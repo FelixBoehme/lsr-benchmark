@@ -22,12 +22,12 @@ EXAMPLE_RETRIEVAL_ENGINE = {
             "command": "/index-and-retrieve.py --dataset $inputDataset --embedding $embeddings --output $outputDir",
         },
         "duckdb": {
-            "image": "",
+            "image": "ghcr.io/reneuir/lsr-benchmark/duckdb:amd64-54d65-1a71b",
             "command": "/index-and-retrieve.py --dataset $inputDataset --embedding $embeddings --output $outputDir",
         },
         
-        "": {
-            "image": "",
+        "numpy-exhaustive": {
+            "image": "ghcr.io/reneuir/lsr-benchmark/numpy-exhaustive:amd64-bc9aa-9beac",
             "command": "/index-and-retrieve.py --dataset $inputDataset --embedding $embeddings --output $outputDir",
         },
     },
@@ -45,12 +45,12 @@ EXAMPLE_RETRIEVAL_ENGINE = {
             "command": "/index-and-retrieve.py --dataset $inputDataset --embedding $embeddings --output $outputDir",
         },
         "duckdb": {
-            "image": "",
+            "image": "ghcr.io/reneuir/lsr-benchmark/duckdb:arm64-54d65-a367d",
             "command": "/index-and-retrieve.py --dataset $inputDataset --embedding $embeddings --output $outputDir",
         },
 
-        "": {
-            "image": "",
+        "numpy-exhaustive": {
+            "image": "ghcr.io/reneuir/lsr-benchmark/numpy-exhaustive:arm64-bc9aa-00322",
             "command": "/index-and-retrieve.py --dataset $inputDataset --embedding $embeddings --output $outputDir",
         },
     }
