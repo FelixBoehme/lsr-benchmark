@@ -145,11 +145,11 @@ def __parse_tirex_measure(measure: "str") -> "Callable":
 def __parse_measure(measure: "str") -> "tuple[str, Literal['ir_measure', 'tirex'], Measure | Callable]":
     try:
         return (measure, 'ir_measure', parse_trec_measure(measure)[0])
-    except ValueError, NameError:
+    except (ValueError, NameError):
         # Fall back to non-TREC measures.
         try:
             return (measure, 'ir_measure', ir_measures.parse_measure(measure))
-        except ValueError, NameError:
+        except (ValueError, NameError):
             # Fall back to TIREx measures.
             return (measure, 'tirex', __parse_tirex_measure(measure))
 
