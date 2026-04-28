@@ -155,6 +155,10 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
                 out_dir = Path(out) / d / e / approach
                 try:
                     run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir)
+                    if approach not in stats:
+                        stats[approach] = {"embeddings": set(), "datasets": set()}
+                    stats[approach]["embeddings"].add(e)
+                    stats[approach]["datasets"].add(d)
                 except Exception:  # noqa: S112
                     continue
 
