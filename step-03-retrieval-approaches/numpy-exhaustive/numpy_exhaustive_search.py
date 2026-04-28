@@ -23,13 +23,20 @@ def retrieve(query_ids, query_embeddings, doc_ids, doc_embeddings, k):
     return results
 
 
-def to_numpy_array(embeddings):
-    dim = None
+def determine_dimension(embeddings):
+    ret = None
+    for embedding_id, tokens, values in embeddings:
+        current_dim = max([int(t) for t in tokens]) + 1
+        if ret is None or current_dim > ret:
+            ret = current_dim
+    return ret
+
+
+def to_numpy_array(embeddings, dim):
     embedding_ids, np_embeddings = [], []
+
     for embedding_id, tokens, values in embeddings:
         embedding_ids.append(embedding_id)
-        if dim is None:
-            dim = max([int(t) for t in tokens]) + 1
         vec = np.zeros(dim)
         for t, v in zip(tokens, values):
             vec[int(t)] = v
@@ -49,11 +56,12 @@ def main(dataset, embedding, output, k):
     print("Load embeddings...")
     d_embeddings = load_embeddings(dataset, embedding, "doc")
     q_embeddings = load_embeddings(dataset, embedding, "query")
+    dim = max([determine_dimension(d_embeddings), determine_dimension(q_embeddings)])
     print("Done loading embeddings.")
 
     with tracking(export_file_path=output / "index-metadata.yml", export_format=ExportFormat.IR_METADATA):
-        doc_ids, doc_embeddings = to_numpy_array(d_embeddings)
-        query_ids, query_embeddings = to_numpy_array(q_embeddings)
+        doc_ids, doc_embeddings = to_numpy_array(d_embeddings, dim)
+        query_ids, query_embeddings = to_numpy_array(q_embeddings, dim)
 
     with tracking(export_file_path=output / "retrieval-metadata.yml", export_format=ExportFormat.IR_METADATA):
         results = retrieve(query_ids, query_embeddings, doc_ids, doc_embeddings, k)
