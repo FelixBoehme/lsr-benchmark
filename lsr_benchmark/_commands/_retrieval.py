@@ -19,7 +19,9 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None):
         return
     tira = Client()
     dataset_path = tira.download_dataset("lsr-benchmark", dataset_id)
-    if embedding.lower() != "none" and embedding not in all_dense_embeddings():
+    if isinstance(embedding, Path):
+        embeddings_dir = embedding.resolve()
+    elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f'lsr-benchmark/lightning-ir/{embedding}', dataset_id)
     elif embedding.lower() != "none" and embedding in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f'lsr-benchmark/sentence-transformers/{embedding}', dataset_id)
@@ -76,6 +78,28 @@ def get_approach_to_execution(approaches, platform):
 
     return approach_to_execution
 
+class ChoiceOrPath(click.ParamType):
+    def __init__(self, choices):
+        self.choices = tuple(choices)
+
+    def get_metavar(self, param, ctx):
+        return f"[{'|'.join(self.choices)}|PATH]"
+
+    def convert(self, value, param, ctx):
+        if value in self.choices:
+            return value
+
+        path = Path(value)
+        if path.exists():
+            return path
+
+        choices_str = ", ".join([f"'{choice}'" for choice in self.choices])
+        self.fail(
+            f"{value!r} is not one of "
+            f"{choices_str} or an exisiting path.",
+            param,
+            ctx
+        )
 
 @click.argument(
     "approaches",
@@ -97,7 +121,7 @@ def get_approach_to_execution(approaches, platform):
 )
 @click.option(
     "--embedding",
-    type=click.Choice(["all", "none", ] + all_embeddings() + list(all_dense_embeddings())),
+    type=ChoiceOrPath(["all", "none", ] + all_embeddings() + list(all_dense_embeddings())),
     multiple=True,
     help="The datasets to run on.",
 )
