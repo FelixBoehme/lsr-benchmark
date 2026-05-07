@@ -12,4 +12,4 @@ RUN pip3 install -r /tmp/requirements.txt --break-system-packages \
     && rm -Rf /tmp/requirements.txt \
     && pip3 cache purge
 
-ADD build-and-search-kannolo-index.py /build-and-search-kannolo-index.py
+ADD build-and-search-kannolo-index.py /index-and-retrieve.py

@@ -44,5 +44,5 @@ RUN python3 -c "import pyterrier as pt; pt.init();" \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
-ADD run-pyterrier-splade.py /run-pyterrier-splade.py
+ADD run-pyterrier-splade.py /index-and-retrieve.py
 
