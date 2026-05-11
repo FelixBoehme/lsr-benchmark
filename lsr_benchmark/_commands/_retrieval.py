@@ -90,13 +90,13 @@ class ChoiceOrPath(click.ParamType):
             return value
 
         path = Path(value)
-        if path.exists():
+        if path.exists() and path.is_dir():
             return path
 
         choices_str = ", ".join([f"'{choice}'" for choice in self.choices])
         self.fail(
             f"{value!r} is not one of "
-            f"{choices_str} or an exisiting path.",
+            f"{choices_str} or an existing path to a directory.",
             param,
             ctx
         )
