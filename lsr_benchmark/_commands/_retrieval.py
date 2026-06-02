@@ -18,7 +18,7 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None):
     if output_dir is not None and Path(output_dir).exists():
         return
     tira = Client()
-    dataset_path = tira.download_dataset("lsr-benchmark", dataset_id)
+    dataset_path = temporary_directory()
     if isinstance(embedding, Path):
         embeddings_dir = embedding.resolve()
     elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
