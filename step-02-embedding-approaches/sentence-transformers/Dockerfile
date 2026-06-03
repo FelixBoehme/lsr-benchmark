@@ -1,4 +1,6 @@
-FROM pytorch/pytorch:2.8.0-cuda12.9-cudnn9-runtime
+#Start from build with all dependencies
+FROM webis/lsr-benchmark-submissions:sentence-transformers-step-02-em-latest-tira-docker-software-id-blazing-buoy
+#FROM pytorch/pytorch:2.8.0-cuda12.9-cudnn9-runtime
 
 ADD requirements.txt /tmp/
 
