@@ -18,12 +18,17 @@ def all_dense_embeddings():
         "all-MiniLM-L6-v2", "paraphrase-MiniLM-L3-v2",
         "msmarco-MiniLM-L6-v3", "paraphrase-TinyBERT-L6-v2",
         "all-mpnet-base-v2", "intfloat-e5-large-v2",
-        "BAAI-bge-m3", "BAAI-bge-large-en-v1.5"
+        "BAAI-bge-m3", "BAAI-bge-large-en-v1.5",
+        "GritLM-7B", "e5-mistral-7b-instruct",
+        "SFR-Embedding-Mistral", "Qwen2-7B-instruct", "Octen-Embedding-8B",
     ])
 
 def all_datasets():
     overview = lsr_overview()
-    return sorted(list(overview.keys()))
+    ret = list(overview.keys())
+    # TODO Integrate this better
+    ret += ["aila-statutes-20260426-training", "aila-casedocs-20260426-training", "financebench-retrieval-20260427-training", "legal-summarization-20260427-training"]
+    return sorted(ret)
 
 
 TIRA_DATASET_ID_TO_IR_DATASET_ID = {
