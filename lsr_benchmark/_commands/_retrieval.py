@@ -11,8 +11,6 @@ import shutil
 import yaml
 from tira.io_utils import docker_supported_target_platform
 import os
-from platform import system
-
 
 def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platform=None):
     if output_dir is not None and Path(output_dir).exists():
@@ -50,13 +48,13 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platf
         raise ValueError(msg)
 
     tag = yaml.safe_load((Path(tmp_dir) / "retrieval-metadata.yml").read_text())["tag"]
-    
+
     if output_dir is not None:
         from tira.io_utils import patch_ir_metadata
         output_dir.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(tmp_dir, output_dir)
         patch_ir_metadata(output_dir, {"data": {"test collection": {"name": "/tira-data/input"}}}, {"data": {"test collection": {"name": dataset_id}}})
-    
+
     return tag
 
 
@@ -112,6 +110,28 @@ class ChoiceOrPath(click.ParamType):
             ctx
         )
 
+class DatasetChoice(click.ParamType):
+    def __init__(self, choices):
+        self.choices = tuple(choices)
+
+    def get_metavar(self, param, ctx):
+        return f"[{'|'.join(self.choices)}|concatenation using '+']"
+
+    def convert(self, value, param, ctx):
+        if value in self.choices:
+            return value
+
+        choices_str = ", ".join([f"'{choice}'" for choice in self.choices])
+        for v in value.split("+"):
+            if v not in self.choices:
+                self.fail(
+                    f"{v!r} is not one of "
+                    f"{choices_str} or a concatenation.",
+                    param,
+                    ctx
+                )
+        return value
+
 @click.argument(
     "approaches",
     type=str,
@@ -126,7 +146,7 @@ class ChoiceOrPath(click.ParamType):
 )
 @click.option(
     "--dataset",
-    type=click.Choice(["all"] + all_datasets()),
+    type=DatasetChoice(["all"] + all_datasets()),
     multiple=True,
     help="The datasets to run on.",
 )
@@ -172,21 +192,22 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
     approach_to_execution = get_approach_to_execution(approaches, platform, embedding, print_message)
 
     if len(dataset) == 0:
-        print_message(f"No datasets are passed.", FormatMsgType.ERROR)
+        print_message("No datasets are passed.", FormatMsgType.ERROR)
         return 1
 
     if len(embedding) == 0:
-        print_message(f"No embedding are passed.", FormatMsgType.ERROR)
+        print_message("No embedding are passed.", FormatMsgType.ERROR)
         return 1
 
     if len(approaches) == 0:
-        print_message(f"No approaches are passed.", FormatMsgType.ERROR)
+        print_message("No approaches are passed.", FormatMsgType.ERROR)
         return 1
 
     stats = {}
     for d in dataset:
         for e in embedding:
             for approach in approaches:
+                #TODO: adjust out_dir when joining dataset
                 out_dir = Path(out) / d / e / approach
                 try:
                     run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir, platform=platform)
@@ -194,10 +215,11 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
                         stats[approach] = {"embeddings": set(), "datasets": set()}
                     stats[approach]["embeddings"].add(e)
                     stats[approach]["datasets"].add(d)
-                except Exception:  # noqa: S112
+                except Exception as e:  # noqa: S112
+                    print(e)
                     continue
 
     for approach in stats:
         print_message(f"Approach {approach} produced valid outputs on {len(stats[approach]['datasets'])} datasets for {len(stats[approach]['embeddings'])} embeddings.", FormatMsgType.OK)
-    
+
     return 0
