@@ -10,6 +10,7 @@ from ._commands._evaluate import evaluate
 from ._commands._retrieval import retrieval
 from ._commands._download import download_embeddings, download_run
 from ._commands._verify_installation import verify_installation
+from ._commands._modify_data import modify_data
 from .datasets import TIRA_DATASET_ID_TO_IR_DATASET_ID, IR_DATASET_TO_TIRA_DATASET, SUPPORTED_IR_DATASETS
 import os
 
@@ -115,6 +116,7 @@ main.command()(download_run)
 main.command()(evaluate)
 main.command()(retrieval)
 main.command()(verify_installation)
+main.command()(modify_data)
 
 if __name__ == '__main__':
     main()
