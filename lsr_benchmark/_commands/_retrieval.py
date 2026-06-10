@@ -14,7 +14,7 @@ import os
 from platform import system
 
 
-def run_foo(docker_image, command, dataset_id, embedding, output_dir=None):
+def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platform=None):
     if output_dir is not None and Path(output_dir).exists():
         return
     tira = Client()
@@ -39,6 +39,7 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None):
         allow_network=False,
         input_run=embeddings_dir,
         mount_directory=mount_directory,
+        platform=platform if platform else docker_supported_target_platform(),
     )
 
     result, msg = check_format(Path(tmp_dir), ["run.txt"], {})
@@ -57,22 +58,30 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None):
     return tag
 
 
-def get_approach_to_execution(approaches, platform):
+def get_approach_to_execution(approaches, platform, embedding, print_message):
     tira = Client()
     approach_to_execution = {}
     for approach in approaches:
         if approach in EXAMPLE_RETRIEVAL_ENGINE[platform]:
             approach_to_execution[approach] = {"tag": EXAMPLE_RETRIEVAL_ENGINE[platform][approach]["image"], "command": EXAMPLE_RETRIEVAL_ENGINE[platform][approach]["command"]}
         else:
+            approach_path = Path(approach)
+            if not approach_path.is_dir():
+                approach_path = Path(__file__).resolve().parents[2] / "step-03-retrieval-approaches" / approach
+            if not approach_path.is_dir():
+                raise ValueError(
+                    f"Approach '{approach}' is neither a predefined engine nor a directory "
+                    f"(looked in '{approach}' and 'step-03-retrieval-approaches/{approach}')."
+                )
             docker_tag, zipped_code, remotes, commit, active_branch = tira.build_docker_image_from_code(
-                Path(approach), log_message, False
+                approach_path, log_message, False, platform=platform
             )
             if docker_tag in approach_to_execution.values():
                 raise ValueError(f"Approach {approach} produces a docker tag that is already used by another approach.")
-            cmd = (Path(approach) / "README.md").read_text().split("tira-cli code-submission")[1].split('--command')[1].split("'")[1]
+            cmd = (approach_path / "README.md").read_text().split("tira-cli code-submission")[1].split('--command')[1].split("'")[1]
 
             log_message(f"Approach {approach} is compiled.", FormatMsgType.OK)
-            system_tag = run_foo(docker_tag, cmd, 'tiny-example-20251002_0-training', embedding[0])
+            system_tag = run_foo(docker_tag, cmd, 'tiny-example-20251002_0-training', embedding[0], platform=platform)
             print_message(f"Approach {approach} compiled and produced valid outputs on example dataset (tag={system_tag}).", FormatMsgType.OK)
             approach_to_execution[approach] = {"tag": docker_tag, "command": cmd}
 
@@ -155,21 +164,21 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
     platform = docker_supported_target_platform()
 
     if platform not in ("linux/amd64", "linux/arm64"):
-        print_message(f"The platform {docker_supported_target_platform()} is not supported.", _fmt.ERROR)
+        print_message(f"The platform {docker_supported_target_platform()} is not supported.", FormatMsgType.ERROR)
         return 1
 
-    approach_to_execution = get_approach_to_execution(approaches, platform)
+    approach_to_execution = get_approach_to_execution(approaches, platform, embedding, print_message)
 
     if len(dataset) == 0:
-        print_message(f"No datasets are passed.", _fmt.ERROR)
+        print_message(f"No datasets are passed.", FormatMsgType.ERROR)
         return 1
 
     if len(embedding) == 0:
-        print_message(f"No embedding are passed.", _fmt.ERROR)
+        print_message(f"No embedding are passed.", FormatMsgType.ERROR)
         return 1
 
     if len(approaches) == 0:
-        print_message(f"No approaches are passed.", _fmt.ERROR)
+        print_message(f"No approaches are passed.", FormatMsgType.ERROR)
         return 1
 
     stats = {}
@@ -178,7 +187,7 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
             for approach in approaches:
                 out_dir = Path(out) / d / e / approach
                 try:
-                    run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir)
+                    run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir, platform=platform)
                     if approach not in stats:
                         stats[approach] = {"embeddings": set(), "datasets": set()}
                     stats[approach]["embeddings"].add(e)

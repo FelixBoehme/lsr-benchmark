@@ -3,4 +3,5 @@ tirex-tracker>=0.2.16
 tira>=0.0.180
 click
 --find-links https://download.pytorch.org/whl/torch_stable.html
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch>=2.8.0

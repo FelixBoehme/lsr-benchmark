@@ -6,19 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
 
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(amd64)|(AMD64)")
-    set(_PISA_ARCH_X86 ON)
-    set(_pisa_x86_flags "-mtune=generic -march=x86-64 -msse4.2 -mavx -mavx2 -mfma -mbmi -mpopcnt")
-    set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} ${_pisa_x86_flags}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${_pisa_x86_flags}")
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "(aarch64)|(arm64)|(ARM64)")
-    set(_PISA_ARCH_X86 OFF)
-    set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} -mtune=generic")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mtune=generic")
-else()
-    set(_PISA_ARCH_X86 OFF)
-endif()
+set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} -mtune=generic")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mtune=generic")
 
 
 set(PISA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
@@ -30,7 +19,7 @@ include_directories(${Python_NumPy_INCLUDE_DIRS})
 
 
 
-# Write `_content` to `_path` only if the existing file differs.
+# Write file only if content changed.
 function(_pisa_write_if_changed _path _content)
     set(_existing "")
     if(EXISTS "${_path}")
@@ -42,8 +31,7 @@ function(_pisa_write_if_changed _path _content)
     endif()
 endfunction()
 
-# Wrap `#include <x86intrin.h>` in an architecture guard. Idempotent: looks
-# at the bytes preceding the include and skips if `__x86_64__` already guards it.
+# Wrap x86intrin include in architecture guard.
 function(_pisa_guard_x86intrin _file)
     if(NOT EXISTS "${_file}")
         return()
@@ -65,7 +53,7 @@ function(_pisa_guard_x86intrin _file)
     message(STATUS "pyterrier_pisa: ARM guard applied to ${_file}")
 endfunction()
 
-# Drop unconditional `-march=native` lines from the submodule CMakeLists files.
+# Strip -march=native from submodule CMakeLists.
 function(_pisa_strip_march_native _file)
     if(NOT EXISTS "${_file}")
         return()
@@ -81,11 +69,11 @@ function(_pisa_strip_march_native _file)
     endif()
 endfunction()
 
-# Apply x86intrin guards (harmless on x86, useful on ARM).
+# Apply x86intrin guards.
 _pisa_guard_x86intrin("${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/util/intrinsics.hpp")
 _pisa_guard_x86intrin("${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/codec/VarIntG8IU.h")
 
-# Strip redundant -march=native from submodule CMakeLists.
+# Strip -march=native.
 _pisa_strip_march_native("${CMAKE_CURRENT_SOURCE_DIR}/pisa/CMakeLists.txt")
 _pisa_strip_march_native("${CMAKE_CURRENT_SOURCE_DIR}/pisa/external/CMakeLists.txt")
 
@@ -94,10 +82,10 @@ set(_rgb_file "${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/recursive_graph_bis
 if(EXISTS "${_rgb_file}")
     file(READ "${_rgb_file}" _rgb_content)
     if(_rgb_content MATCHES "__m128 _deg")
-        # Greedy `[^@]*` matches across newlines (no DOTALL in CMake regex).
+        # Replace SSE expb() with scalar version.
         string(REGEX REPLACE
             "__m128 _deg[^@]*return a\\[3\\] - a\\[2\\] \\+ a\\[1\\] - a\\[0\\];"
-            "/* PISA_ARM_PATCH: scalar replacement for SSE expb() */ return double(deg1) * logn1 - double(deg1) * log2(deg1 + 1) + double(deg2) * logn2 - double(deg2) * log2(deg2 + 1);"
+            "/* ARM patch: scalar expb(). */ return double(deg1) * logn1 - double(deg1) * log2(deg1 + 1) + double(deg2) * logn2 - double(deg2) * log2(deg2 + 1);"
             _rgb_new "${_rgb_content}")
         if(NOT _rgb_new STREQUAL _rgb_content)
             file(WRITE "${_rgb_file}" "${_rgb_new}")
@@ -107,12 +95,11 @@ if(EXISTS "${_rgb_file}")
 endif()
 
 
-if(NOT _PISA_ARCH_X86)
-  # External lib: MaskedVByte (SSE4.1/AVX2) → portable scalar VByte.
+# MaskedVByte: scalar replacement for SSE/AVX.
   set(_mb "${CMAKE_CURRENT_SOURCE_DIR}/pisa/external/MaskedVByte")
   if(IS_DIRECTORY "${_mb}")
     _pisa_write_if_changed("${_mb}/src/varintdecode.c" [=[
-/* PISA_ARM_STUB: portable scalar replacement for MaskedVByte SSE/AVX code. */
+/* ARM stub: scalar VByte. */
 #include <stdint.h>
 #include <stddef.h>
 #include "../include/varintdecode.h"
@@ -177,7 +164,7 @@ int masked_vbyte_search_delta(const uint8_t *in, uint64_t length, uint32_t prev,
 }
 ]=])
     _pisa_write_if_changed("${_mb}/src/varintencode.c" [=[
-/* PISA_ARM_STUB: portable scalar replacement for MaskedVByte SSE/AVX code. */
+/* ARM stub: scalar VByte. */
 #include <stdint.h>
 #include <stddef.h>
 #include "../include/varintencode.h"
@@ -202,33 +189,27 @@ size_t vbyte_encode_delta(uint32_t *in, size_t length, uint8_t *bout, uint32_t p
 ]=])
   endif()
 
-  # External lib: simdcomp (SSE2 __m128i) → empty stubs. simdbp.hpp below
-  # routes around the simdcomp symbols entirely on aarch64.
+  # simdcomp: empty stubs.
   set(_sc "${CMAKE_CURRENT_SOURCE_DIR}/pisa/external/simdcomp")
   if(IS_DIRECTORY "${_sc}")
-    _pisa_write_if_changed("${_sc}/src/simdbitpacking.c" "/* PISA_ARM_STUB: no SSE2 */\n")
-    _pisa_write_if_changed("${_sc}/src/simdcomputil.c" "/* PISA_ARM_STUB: no SSE2 */\n")
+    _pisa_write_if_changed("${_sc}/src/simdbitpacking.c" "/* ARM stub. */\n")
+    _pisa_write_if_changed("${_sc}/src/simdcomputil.c" "/* ARM stub. */\n")
   endif()
 
-  # External lib: streamvbyte (SSE/SSSE3 in upstream) → empty stubs.
-  # streamvbyte.hpp below routes around the streamvbyte symbols entirely.
+  # streamvbyte: empty stubs.
   set(_svb "${CMAKE_CURRENT_SOURCE_DIR}/pisa/external/streamvbyte")
   if(IS_DIRECTORY "${_svb}")
-    _pisa_write_if_changed("${_svb}/src/streamvbyte.c" "/* PISA_ARM_STUB: no SSE/SSSE3 */\n")
-    _pisa_write_if_changed("${_svb}/src/streamvbytedelta.c" "/* PISA_ARM_STUB: no SSE/SSSE3 */\n")
+    _pisa_write_if_changed("${_svb}/src/streamvbyte.c" "/* ARM stub. */\n")
+    _pisa_write_if_changed("${_svb}/src/streamvbytedelta.c" "/* ARM stub. */\n")
   endif()
 
-  # External lib: FastPFor — replace its CMakeLists with a minimal stub. None
-  # of FastPFor's sources can compile on aarch64 (immintrin.h SSE2/AVX2). The
-  # stubbed STATIC lib has one empty translation unit so dependents that link
-  # against it still work; the headers directory is exposed so the (now unused)
-  # FastPFor headers remain reachable for include resolution.
+  # FastPFor: minimal CMakeLists with empty TU.
   set(_fp "${CMAKE_CURRENT_SOURCE_DIR}/pisa/external/FastPFor")
   if(IS_DIRECTORY "${_fp}")
     _pisa_write_if_changed("${_fp}/fastpfor_arm_stub.cpp"
-        "/* PISA_ARM_STUB: empty translation unit so FastPFor STATIC has at least one source. */\n")
+        "/* ARM stub: empty TU. */\n")
     _pisa_write_if_changed("${_fp}/CMakeLists.txt" [=[
-# PISA_ARM_STUB: replaces upstream FastPFor CMakeLists on aarch64.
+# ARM stub: minimal FastPFor build.
 cmake_minimum_required(VERSION 3.5)
 project(FastPFor CXX)
 add_library(FastPFor STATIC fastpfor_arm_stub.cpp)
@@ -236,19 +217,17 @@ target_include_directories(FastPFor PUBLIC headers)
 ]=])
   endif()
 
-  # External lib: QMX (SSE4.1/SSE4.2) → empty INTERFACE library.
+  # QMX: empty INTERFACE library.
   set(_qmx_dir "${CMAKE_CURRENT_SOURCE_DIR}/pisa/external/QMX")
   if(IS_DIRECTORY "${_qmx_dir}")
     _pisa_write_if_changed("${_qmx_dir}/CMakeLists.txt"
-        "# PISA_ARM_STUB: no SSE4 on aarch64\nadd_library(QMX INTERFACE)\n")
+        "# ARM stub.\nadd_library(QMX INTERFACE)\n")
   endif()
 
-  # PISA header: VarIntG8IU.h is only included by block_codecs.hpp (which we
-  # also rewrite below). Replace with a minimal stub class so any stray
-  # transitive inclusion still parses on aarch64.
+  # VarIntG8IU.h: empty placeholder class.
   _pisa_write_if_changed(
       "${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/codec/VarIntG8IU.h"
-      [=[/* PISA_ARM_STUB: SIMD-free placeholder; real implementation requires SSE3/SSE4.1. */
+      [=[/* ARM stub: empty placeholder. */
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -261,11 +240,7 @@ class VarIntG8IU {
 }  // namespace pisa
 ]=])
 
-  # PISA codec headers — each upstream version pulls in an external SIMD lib
-  # (FastPFor/common.h → immintrin.h, QMX with SSE4, streamvbyte). On aarch64
-  # we replace each with an interpolative-only struct that keeps the same
-  # public name and signature so index_types.hpp template instantiations
-  # still resolve.
+  # Codec headers: route through interpolative_block.
   set(_arm_codec_stubs
       "qmx:qmx_block"
       "simple8b:simple8b_block"
@@ -278,7 +253,7 @@ class VarIntG8IU {
     list(GET _parts 1 _struct)
     set(_target "${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/codec/${_hdr}.hpp")
     set(_body
-"/* PISA_ARM_STUB: ${_struct} routed through interpolative_block. */
+"/* ARM stub: routed through interpolative_block. */
 #pragma once
 
 #include \"codec/block_codecs.hpp\"
@@ -302,15 +277,10 @@ struct ${_struct} {
     _pisa_write_if_changed("${_target}" "${_body}")
   endforeach()
 
-  # PISA header: varintgb.hpp — the upstream version pulls in
-  # FastPFor/headers/common.h (→ immintrin.h) but the actual VarIntGB<>
-  # template is pure C++ (no SIMD). pisa/include/pisa/forward_index.hpp uses
-  # the VarIntGB<> template directly, so we keep it verbatim and only drop
-  # the FastPFor include and replace varintgb_block with an interpolative
-  # stub for consistency with the other ARM codec stubs.
+  # varintgb.hpp: keep VarIntGB, drop FastPFor include.
   _pisa_write_if_changed(
       "${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/codec/varintgb.hpp"
-      [=[/* PISA_ARM_STUB: VarIntGB<> kept verbatim (pure C++); FastPFor include removed; varintgb_block routed through interpolative_block. */
+      [=[/* ARM stub: FastPFor include removed; varintgb_block routed through interpolative_block. */
 #pragma once
 
 #include <array>
@@ -553,11 +523,10 @@ struct varintgb_block {
 }  // namespace pisa
 ]=])
 
-  # PISA header: simdbp.hpp — replace simdbp_block with an interpolative-only
-  # version (real version uses simdcomp's __m128i intrinsics).
+  # simdbp.hpp: route through interpolative_block.
   _pisa_write_if_changed(
       "${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/codec/simdbp.hpp"
-      [=[/* PISA_ARM_STUB: simdbp_block routed through interpolative_block. */
+      [=[/* ARM stub: routed through interpolative_block. */
 #pragma once
 
 #include "codec/block_codecs.hpp"
@@ -579,15 +548,10 @@ struct simdbp_block {
 }  // namespace pisa
 ]=])
 
-  # PISA header: block_codecs.hpp — full rewrite.
-  # The upstream version pulls in FastPFor/optpfor.h (→ common.h → immintrin.h)
-  # and uses __m128i directly inside varint_G8IU_block::codec_type. We replace
-  # the entire file with a slim version that keeps TightVariableByte and
-  # interpolative_block verbatim and replaces optpfor_block / varint_G8IU_block
-  # with interpolative-only stubs.
+  # block_codecs.hpp: SIMD-free rewrite.
   _pisa_write_if_changed(
       "${CMAKE_CURRENT_SOURCE_DIR}/pisa/include/pisa/codec/block_codecs.hpp"
-      [=[/* PISA_ARM_STUB: SIMD-free block_codecs for aarch64. */
+      [=[/* ARM stub: SIMD-free block_codecs. */
 #pragma once
 
 #include <array>
@@ -605,8 +569,7 @@ struct simdbp_block {
 
 namespace pisa {
 
-// VariableByte::decodeArray needs the buffer size, while we only know the
-// number of values. It also pads to 32 bits. We need to rewrite.
+// VByte encoder/decoder that tracks value count instead of buffer size.
 class TightVariableByte {
   public:
     template <uint32_t i>
@@ -758,7 +721,7 @@ struct interpolative_block {
     }
 };
 
-// PISA_ARM_STUB: optpfor_block routed through interpolative_block.
+// ARM stub: routed through interpolative_block.
 struct optpfor_block {
     static const uint64_t block_size = 128;
 
@@ -779,7 +742,7 @@ struct optpfor_block {
     }
 };
 
-// PISA_ARM_STUB: varint_G8IU_block routed through interpolative_block.
+// ARM stub: routed through interpolative_block.
 struct varint_G8IU_block {
     static const uint64_t block_size = 128;
 
@@ -796,7 +759,6 @@ struct varint_G8IU_block {
 
 }  // namespace pisa
 ]=])
-endif()
 
 add_subdirectory(pisa)
 

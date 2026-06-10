@@ -6,7 +6,7 @@ tira-cli code-submission \
     --task lsr-benchmark \
     --tira-vm-id reneuir-baselines \
     --dataset tiny-example-20251002_0-training \
-    --command '/search-pytorch-index.py --dataset $inputDataset --embedding naver/splade-v3 --output $outputDir' \
+    --command '/index-and-retrieve.py --dataset $inputDataset --embedding naver/splade-v3 --output $outputDir' \
     --dry-run
 ```
 
