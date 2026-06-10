@@ -1,12 +1,14 @@
-import click
-import json
 import gzip
-import numpy as np
+import json
+from pathlib import Path
 
-from lsr_benchmark.datasets import all_embeddings, all_dense_embeddings
+import click
+import numpy as np
 from tira.rest_api_client import Client
 from tira.third_party_integrations import default_tira_cache_dir
-from pathlib import Path
+
+from lsr_benchmark.datasets import all_dense_embeddings, all_embeddings
+
 
 class DependentOption(click.Option):
     def __init__(self, *args, requires=None, **kwargs):
@@ -18,10 +20,23 @@ class DependentOption(click.Option):
             raise click.UsageError(f"--{self.name.replace('_', '-')} requires --{self.requires.replace('_', '-')}")
         return super().handle_parse_result(ctx, opts, args)
 
-# TODO: add remaining datasets, add test to check if dataset is missing from map
 DATSET_TO_MAPPING = {
     "tiny-example-20251002_0-training": "d1",
-    "trec-28-deep-learning-passages-20250926-training": "d2",
+    "trec-18-web-20251008-test": "d2",
+    "trec-19-web-20251008-test": "d3",
+    "trec-20-web-20251008-test": "d4",
+    "trec-21-web-20251008-test": "d5",
+    "trec-22-web-20251008-test": "d6",
+    "trec-23-web-20251008-test": "d7",
+    "trec-28-deep-learning-passages-20250926-training": "d8",
+    "trec-28-misinfo-20251008_1-test": "d9",
+    "trec-29-deep-learning-passages-20250926-training": "d10",
+    "trec-33-rag-20250926_1-training": "d11",
+    "trec-robust-2004-fold-1-20250927-test": "d12",
+    "trec-robust-2004-fold-2-20250926-test": "d13",
+    "trec-robust-2004-fold-3-20250926-test": "d14",
+    "trec-robust-2004-fold-4-20250926-test": "d15",
+    "trec-robust-2004-fold-5-20250926-test": "d16",
 }
 
 def map_dataset(dataset):
@@ -138,17 +153,20 @@ def modify_data(datasets: list[str], embedding: str, join: bool, quantization: i
     joint_mappings = "-".join(sorted([d[0] for d in datasets]))
     tira_dir = default_tira_cache_dir()
 
-    result_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{joint_mappings}/")
-    result_path.mkdir(exist_ok=True, parents=True)
-    with open(result_path/"queries.jsonl", "w") as out:
-        for mapping, path, _ in datasets:
-            with open(path/"queries.jsonl", "r") as file:
-                add_prefixes(file, out, mapping, "qid")
-    with gzip.open(result_path/"corpus.jsonl.gz", "wt") as out:
-        for mapping, path, _ in datasets:
-            with gzip.open(path/"corpus.jsonl.gz", "rt") as file:
-                add_prefixes(file, out, mapping, "doc_id")
+    if join:
+        result_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{joint_mappings}/")
+        result_path.mkdir(exist_ok=True, parents=True)
+        with open(result_path/"queries.jsonl", "w") as out:
+            for mapping, path, _ in datasets:
+                with open(path/"queries.jsonl", "r") as file:
+                    add_prefixes(file, out, mapping, "qid")
+        with gzip.open(result_path/"corpus.jsonl.gz", "wt") as out:
+            for mapping, path, _ in datasets:
+                with gzip.open(path/"corpus.jsonl.gz", "rt") as file:
+                    add_prefixes(file, out, mapping, "doc_id")
 
+    # TODO: handle multiple datasets to be only quantized
+    # TODO: handle naming when only quantizing
     if quantization:
         if quantization == 16:
             joint_mappings += "-fp16"
