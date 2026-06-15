@@ -12,6 +12,7 @@ import yaml
 from tira.io_utils import docker_supported_target_platform
 import os
 
+
 def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platform=None):
     if output_dir is not None and Path(output_dir).exists():
         return
@@ -207,7 +208,6 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
     for d in dataset:
         for e in embedding:
             for approach in approaches:
-                #TODO: adjust out_dir when joining dataset
                 out_dir = Path(out) / d / e / approach
                 try:
                     run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir, platform=platform)
@@ -215,8 +215,7 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
                         stats[approach] = {"embeddings": set(), "datasets": set()}
                     stats[approach]["embeddings"].add(e)
                     stats[approach]["datasets"].add(d)
-                except Exception as e:  # noqa: S112
-                    print(e)
+                except Exception:  # noqa: S112
                     continue
 
     for approach in stats:
