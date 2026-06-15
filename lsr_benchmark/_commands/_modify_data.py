@@ -99,7 +99,7 @@ def quantize(embeddings: np.ndarray, level: int, bitpack: bool) -> np.ndarray:
             raise ValueError(f"Quantizing to {level} bits is not supported.")
 
 def load_and_merge_embeddings(
-    datasets: list[tuple[str, Path, Path]],
+    embedding_paths: list[Path],
     data_dir: str,
     quantization: int | None,
     bitpack: bool,
@@ -111,7 +111,7 @@ def load_and_merge_embeddings(
     all_indptr = []
     current_offset = 0
 
-    for i, (_, _, emb_path) in enumerate(datasets):
+    for i, emb_path in enumerate(embedding_paths):
         with np.load(emb_path / data_dir) as npz:
             data = npz["data"]
             indices = npz["indices"]
@@ -142,8 +142,7 @@ def load_and_merge_embeddings(
     "--embedding",
     type=click.Choice(all_embeddings() + list(all_dense_embeddings())),
     required=True,
-    # TODO: enable use for multiple embeddings
-    # multiple=True,
+    multiple=True,
     help="The embeddings to run on"
 )
 @click.option(
@@ -155,7 +154,7 @@ def load_and_merge_embeddings(
     "-q",
     "--quantization",
     type=int,
-    # TODO: allow multiple levels
+    multiple=True,
     help="Number of bits to quantize data to"
 )
 @click.option(
@@ -166,60 +165,71 @@ def load_and_merge_embeddings(
     is_flag=True,
     help="Whether to bitpack the quantized data"
 )
-def modify_data(datasets: list[str], embedding: str, join: bool, quantization: int, bitpack: bool) -> int:
-    if not (join or quantization):
+def modify_data(datasets: list[str], embedding: list[str], join: bool, quantization: list[int], bitpack: bool) -> int:
+    if not join and not quantization:
         raise ValueError("No modification chosen! Aborting.")
 
+    mappings = list()
+    choices = ", ".join([f"'{k}'" for k in DATASET_TO_MAPPING.keys()])
     for d in datasets:
-        if d not in DATASET_TO_MAPPING:
-            choices = ", ".join([f"'{k}'" for k in DATASET_TO_MAPPING.keys()])
+        try:
+            mappings.append(DATASET_TO_MAPPING[d])
+        except KeyError:
             raise click.BadParameter(f"'{d}' not one of {choices}", param_hint="datasets")
 
     tira = Client()
-    resolved_datasets = [
-        (
-            DATASET_TO_MAPPING[d],
-            tira.download_dataset("lsr-benchmark", d),
-            get_embedding_path(embedding, d, tira)
-        )
-        for d in datasets
-    ]
-
-    joint_mappings = "-".join(sorted([d[0] for d in resolved_datasets]))
+    joint_mappings = "-".join(sorted(mappings))
     tira_dir = default_tira_cache_dir()
+
+    dataset_paths = [tira.download_dataset("lsr-benchmark", d) for d in datasets]
 
     if join:
         join_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{joint_mappings}/")
         join_path.mkdir(exist_ok=True, parents=True)
 
         with open(join_path/"queries.jsonl", "w") as out:
-            for mapping, path, _ in resolved_datasets:
+            for mapping, path in zip(mappings, dataset_paths):
                 with open(path/"queries.jsonl", "r") as file:
                     prefix_json(file, out, mapping, "qid")
         with gzip.open(join_path/"corpus.jsonl.gz", "wt") as out:
-            for mapping, path, _ in resolved_datasets:
+            for mapping, path in zip(mappings, dataset_paths):
                 with gzip.open(path/"corpus.jsonl.gz", "rt") as file:
                     prefix_json(file, out, mapping, "doc_id")
 
-    # TODO: handle multiple datasets to be only quantized
-    # TODO: handle naming when only quantizing
-    suffix = (
-        "-fp16" if quantization == 16
-        else f"-q{quantization}" if quantization
-        else ""
-    )
+    for emb in embedding:
+        embedding_paths = [get_embedding_path(emb, d, tira) for d in datasets]
 
-    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_mappings}{suffix}/{embedding}")
-    (emb_result_path/"doc").mkdir(parents=True, exist_ok=True)
-    (emb_result_path/"query").mkdir(parents=True, exist_ok=True)
+        for quant_level in quantization or [None]:
+            suffix = "-fp16" if quant_level == 16 else f"-q{quant_level}" if quant_level else ""
 
-    for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
-        with open(emb_result_path/id_file, "w") as out:
-            for mapping, _, path in resolved_datasets:
-                with open(path/id_file, "r") as file:
-                    for line in file:
-                        out.write(f"{mapping}-{line.strip()}\n")
+            if join:
+                emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_mappings}{suffix}/{emb}")
 
-    for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
-        load_and_merge_embeddings(resolved_datasets, emb_file, quantization, bitpack, emb_result_path)
+                (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
+                (emb_result_path / "query").mkdir(exist_ok=True)
+
+                for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
+                    with open(emb_result_path / id_file, "w") as out:
+                        for mapping, path in zip(mappings, embedding_paths):
+                            with open(path / id_file, "r") as file:
+                                for line in file:
+                                    out.write(f"{mapping}-{line.strip()}\n")
+
+                for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
+                    load_and_merge_embeddings(embedding_paths, emb_file, quant_level, bitpack, emb_result_path)
+            else:
+                for dataset, emb_path in zip(datasets, embedding_paths):
+                    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}{suffix}/{emb}")
+
+                    (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
+                    (emb_result_path / "query").mkdir(exist_ok=True)
+
+                    for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
+                        with open(emb_result_path / id_file, "w") as out:
+                            with open(emb_path / id_file, "r") as file:
+                                out.write(file.read())
+
+                    for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
+                        load_and_merge_embeddings([emb_path], emb_file, quant_level, bitpack, emb_result_path)
+
     return 0
