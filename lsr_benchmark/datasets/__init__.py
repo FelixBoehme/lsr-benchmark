@@ -21,6 +21,7 @@ def all_dense_embeddings():
         "BAAI-bge-m3", "BAAI-bge-large-en-v1.5",
         "e5-mistral-7b-instruct", "SFR-Embedding-Mistral",
         "Linq-Embed-Mistral", "Octen-Embedding-8B", "Qwen3-Embedding-8B",
+        "speed-embedding-7b-instruct",
     ])
 
 def all_datasets():
