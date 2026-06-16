@@ -15,31 +15,13 @@ from mteb.types import PromptType
 from datasets import Dataset
 
 # Maximum document length across the four RTEB validation datasets is 222,890
-# characters (AILACasedocs). We truncate at 250,000 characters (≈ 25,000 tokens)
+# characters (AILACasedocs). We truncate at 250,00 characters (≈ 2,500 tokens)
 # to cover all RTEB documents while preventing OOM on very long ClueWeb documents.
-TRUNCATE_LENGTH = 25000
+TRUNCATE_LENGTH = 2500
 
 # Team the embeddings are namespaced under (mirrors the "actor.team" the other
 # engines set; used for the run tag and for tira lookup).
 TEAM = "mteb"
-
-# Generic retrieval instruction, used for datasets that have no MTEB/RTEB task
-# (e.g. TREC-DL, Robust04, ClueWeb). Mirrors the default retrieval instruction
-# of MTEB/E5-style instruct models.
-GENERIC_RETRIEVAL_PROMPT = (
-    "Given a web search query, retrieve relevant passages that answer the query"
-)
-
-# ir-datasets path -> MTEB task name.
-# Uses lsr_benchmark.datasets.TIRA_DATASET_ID_TO_IR_DATASET_ID to resolve
-# lsr-benchmark dataset ids to ir-datasets paths first, so we only need to
-# map the 4 RTEB datasets here rather than duplicating the full id table.
-IR_DATASET_TO_MTEB_TASK = {
-    "rteb/aila/statutes":       "AILAStatutes",
-    "rteb/aila/casedocs":       "AILACasedocs",
-    "rteb/legal-summarization": "LegalSummarization",
-    "rteb/financebench":        "FinanceBenchRetrieval",
-}
 
 
 def convert_embeddings_dense(embeddings: np.ndarray):
@@ -58,35 +40,13 @@ def truncate_texts(texts, truncate_length=TRUNCATE_LENGTH):
     return [t[:(10 * truncate_length)] for t in texts]
 
 
-def resolve_task_metadata(dataset: str, mteb_task: str = None) -> TaskMetadata:
-    """The MTEB TaskMetadata that drives prompt selection.
-
-    Precedence:
-    1. explicit --mteb-task argument
-    2. known RTEB datasets via lsr-benchmark's TIRA_DATASET_ID_TO_IR_DATASET_ID
-       + IR_DATASET_TO_MTEB_TASK
-    3. dataset name that happens to be a valid MTEB task name
-    4. generic Retrieval task carrying the default retrieval instruction
-    """
-    if mteb_task:
-        return get_task(mteb_task).metadata
-
-    # resolve lsr-benchmark id -> ir-datasets path -> MTEB task name
-    ir_id = TIRA_DATASET_ID_TO_IR_DATASET_ID.get(dataset, dataset)
-    name = IR_DATASET_TO_MTEB_TASK.get(ir_id)
-    if name:
-        return get_task(name).metadata
-
-    try:  # the dataset might itself be a valid MTEB task name
-        return get_task(dataset).metadata
-    except Exception:
-        pass
-
+def resolve_task_metadata() -> TaskMetadata:
+    """The MTEB TaskMetadata that drives prompt selection. We always use the same prompt"""
     return TaskMetadata(
-        dataset={"path": f"lsr-benchmark/{dataset}", "revision": "1"},
-        name=f"lsr-benchmark/{dataset}",
+        dataset={"path": f"lsr-benchmark/generic", "revision": "1"},
+        name=f"lsr-benchmark/generic",
         description="Generic lsr-benchmark retrieval task.",
-        prompt=GENERIC_RETRIEVAL_PROMPT,
+        prompt="Given a web search query, retrieve relevant passages that answer the query",
         type="Retrieval",
         modalities=["text"],
         category="t2t",
@@ -164,7 +124,7 @@ def main(dataset: str, model: str, batch_size: int, device: str, mteb_task: str,
     module = get_model(model, device=device)
     register_metadata({"actor": {"team": TEAM}, "tag": model.replace('/', '-')})
 
-    task_metadata = resolve_task_metadata(dataset, mteb_task)
+    task_metadata = resolve_task_metadata()
     normalize = should_normalize(module, normalize)
 
     ir_dataset = ir_datasets.load(f"lsr-benchmark/{dataset}")
