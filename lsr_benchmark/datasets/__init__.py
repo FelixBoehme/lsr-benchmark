@@ -19,8 +19,8 @@ def all_dense_embeddings():
         "msmarco-MiniLM-L6-v3", "paraphrase-TinyBERT-L6-v2",
         "all-mpnet-base-v2", "intfloat-e5-large-v2",
         "BAAI-bge-m3", "BAAI-bge-large-en-v1.5",
-        "GritLM-7B", "e5-mistral-7b-instruct",
-        "SFR-Embedding-Mistral", "Qwen2-7B-instruct", "Octen-Embedding-8B",
+        "e5-mistral-7b-instruct", "SFR-Embedding-Mistral",
+        "Linq-Embed-Mistral", "Octen-Embedding-8B", "Qwen3-Embedding-8B",
     ])
 
 def all_datasets():

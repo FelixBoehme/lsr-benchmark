@@ -23,6 +23,8 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platf
         embeddings_dir = embedding.resolve()
     elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f'lsr-benchmark/lightning-ir/{embedding}', dataset_id)
+    elif embedding.lower() != "none" and embedding in set(["e5-mistral-7b-instruct", "SFR-Embedding-Mistral", "Linq-Embed-Mistral", "Octen-Embedding-8B", "Qwen3-Embedding-8B"]):
+        embeddings_dir = tira.get_run_output(f'lsr-benchmark/mteb/{embedding}', dataset_id)
     elif embedding.lower() != "none" and embedding in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f'lsr-benchmark/sentence-transformers/{embedding}', dataset_id)
     else:
