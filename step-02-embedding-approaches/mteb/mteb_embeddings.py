@@ -14,13 +14,8 @@ from mteb.abstasks.task_metadata import TaskMetadata
 from mteb.types import PromptType
 from datasets import Dataset
 
-# Maximum document length across the four RTEB validation datasets is 222,890
-# characters (AILACasedocs). We truncate at 250,00 characters (≈ 2,500 tokens)
-# to cover all RTEB documents while preventing OOM on very long ClueWeb documents.
-TRUNCATE_LENGTH = 768
 
-# Team the embeddings are namespaced under (mirrors the "actor.team" the other
-# engines set; used for the run tag and for tira lookup).
+TRUNCATE_LENGTH = 512
 TEAM = "mteb"
 
 
