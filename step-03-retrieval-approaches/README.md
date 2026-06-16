@@ -2,7 +2,7 @@
 
 This directory contains the retrieval engines that we currently have in the lsr_benchmark. We aim to organize the lsr_benchmark as mono-repo that is fully self contained with simple and clean implementations, for that reason, if you want to contribute new retrieval engines (we would be very happy about that), please make a pull request.
 
-Currently, we have 8 retrieval engines that can run lsr retrieval:
+Currently, we have 9 retrieval engines that can run lsr retrieval:
 
 - [duckdb](duckdb)
 - [kannolo](kannolo)
@@ -12,6 +12,7 @@ Currently, we have 8 retrieval engines that can run lsr retrieval:
 - [pyterrier-splade-pisa](pyterrier-splade-pisa)
 - [pytorch-naive](pytorch-naive)
 - [seismic](seismic)
+- [sqlite](sqlite)
 
 Additionally, we have two lexical retrieval engines as baselines:
 
@@ -23,7 +24,7 @@ Additionally, we have two lexical retrieval engines as baselines:
 The following code snippet runs all lsr retrieval engines on all embeddings and all datasets and stores the outputs in a directory `../runs`:
 
 ```
-lsr-benchmark retrieval -o ../runs duckdb kannolo naive-search pyterrier-splade pyterrier-splade-pisa seismic pytorch-naive pyserini-lsr
+lsr-benchmark retrieval -o ../runs duckdb kannolo naive-search pyterrier-splade pyterrier-splade-pisa seismic sqlite pytorch-naive pyserini-lsr
 ```
 
 The following snippet runs all lexical retrieval engines on all datasets and stores the outputs in a directory `../runs`:
