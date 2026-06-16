@@ -111,8 +111,8 @@ def embedd_text_with_model(model, texts, ids, output, task_metadata,
               help="Override the MTEB task name used for prompt selection (e.g. 'AILACasedocs').")
 @click.option("--normalize/--no-normalize", "normalize", default=None,
               help="Force (no-)L2-normalization. Default: normalize iff the model's similarity is cosine.")
-@click.option("--truncate-length", "truncate_length", type=int, default=None,
-              help="Optional character truncation (tokens*10). Default: none (model handles it).")
+@click.option("--truncate-length", "truncate_length", type=int, default=TRUNCATE_LENGTH,
+              help="Optional character truncation (tokens*10).")
 def main(dataset: str, model: str, batch_size: int, device: str, mteb_task: str,
          normalize: bool, truncate_length: int, output: Path):
     lsr_benchmark.register_to_ir_datasets(dataset)
