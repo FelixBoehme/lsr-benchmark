@@ -89,6 +89,7 @@ def load_and_merge_embeddings(
         "indptr": np.concatenate(all_indptr),
     }
 
+
 @click.argument(
     "datasets",
     type=click.Choice(list(DATASET_TO_MAPPING.keys())),
@@ -125,25 +126,23 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
     click.echo("Downloading/Verifying datasets...")
     dataset_paths = [tira.download_dataset("lsr-benchmark", d) for d in tqdm(datasets, desc="Datasets")]
 
-    created_paths: list[Path] = []
+    created_dataset_dirs = set()
+    created_embedding_dirs = set()
 
     if join:
         join_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{joint_mappings}/")
         join_path.mkdir(exist_ok=True, parents=True)
+        created_dataset_dirs.add(join_path)
 
-        queries_out = join_path / "queries.jsonl"
-        with open(queries_out, "w") as out:
+        with open(join_path / "queries.jsonl", "w") as out:
             for i, (mapping, path) in tqdm(enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Queries"):
                 with open(path / "queries.jsonl", "r") as file:
                     prefix_json(file, out, mapping, "qid", desc=f"Prefixing {datasets[i]}")
-        created_paths.append(queries_out)
 
-        corpus_out = join_path / "corpus.jsonl.gz"
-        with gzip.open(corpus_out, "wt") as out:
+        with gzip.open(join_path / "corpus.jsonl.gz", "wt") as out:
             for i, (mapping, path) in tqdm(enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Corpora"):
                 with gzip.open(path / "corpus.jsonl.gz", "rt") as file:
                     prefix_json(file, out, mapping, "doc_id", desc=f"Prefixing {datasets[i]}")
-        created_paths.append(corpus_out)
 
     for emb in tqdm(embedding, desc="Processing Embeddings"):
         embedding_paths = [get_embedding_path(emb, d, tira) for d in datasets]
@@ -158,26 +157,27 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
                     (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
                     (emb_result_path / "query").mkdir(exist_ok=True)
 
-                    emb_out_path = emb_result_path / emb_file
+                    created_embedding_dirs.add(emb_result_path)
+
                     np.savez_compressed(
-                        emb_out_path,
+                        emb_result_path / emb_file,
                         data=quantize(merged_embeddings["data"], quant_level)
                         if quant_level
                         else merged_embeddings["data"],
                         indices=merged_embeddings["indices"],
                         indptr=merged_embeddings["indptr"],
                     )
-                    created_paths.append(emb_out_path)
 
             for quant_level in quantization or [None]:
+                suffix = "-fp16" if quant_level == 16 else f"-q{quant_level}" if quant_level is not None else ""
+                emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_mappings}{suffix}/{emb}")
                 for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
-                    id_out_path = emb_result_path / id_file
-                    with open(id_out_path, "w") as out:
+                    with open(emb_result_path / id_file, "w") as out:
                         for mapping, path in zip(mappings, embedding_paths):
                             with open(path / id_file, "r") as file:
                                 for line in file:
                                     out.write(f"{mapping}-{line.strip()}\n")
-                    created_paths.append(id_out_path)
+
         elif quantization:
             for dataset, emb_path in tqdm(zip(datasets, embedding_paths), total=len(datasets), desc=f"Quantizing {emb}", leave=False):
                 for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
@@ -189,23 +189,30 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
                         (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
                         (emb_result_path / "query").mkdir(exist_ok=True)
 
-                        emb_out_path = emb_result_path / emb_file
+                        created_embedding_dirs.add(emb_result_path)
+
                         np.savez_compressed(
-                            emb_out_path,
+                            emb_result_path / emb_file,
                             data=quantize(data["data"], quant_level),
                             indices=data["indices"],
                             indptr=data["indptr"],
                         )
-                        created_paths.append(emb_out_path)
 
                 for quant_level in quantization:
+                    suffix = "-fp16" if quant_level == 16 else f"-q{quant_level}"
+                    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}{suffix}/{emb}")
                     for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
-                        id_out_path = emb_result_path / id_file
-                        shutil.copy(emb_path / id_file, id_out_path)
-                        created_paths.append(id_out_path)
+                        shutil.copy(emb_path / id_file, emb_result_path / id_file)
 
-    click.secho("Successfully generated the following files:")
-    for path in created_paths:
-        click.echo(f"  - {path}")
+    click.echo("\nFollowing paths have been created:")
+    if created_dataset_dirs:
+        click.echo("Dataset:")
+        for path in sorted(created_dataset_dirs):
+            click.echo(f"  - {path}")
+
+    if created_embedding_dirs:
+        click.echo("Embeddings:")
+        for path in sorted(created_embedding_dirs):
+            click.echo(f"  - {path}")
 
     return 0
