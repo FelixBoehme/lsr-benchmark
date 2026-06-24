@@ -10,6 +10,7 @@ import click
 from shutil import copy2
 from tira.io_utils import patch_ir_metadata
 import yaml
+from tira.rest_api_client import Client
 from lsr_benchmark.datasets import IR_DATASET_TO_TIRA_DATASET
 
 SISAP_RETRIEVAL_DEPTH = 30
@@ -20,7 +21,13 @@ class MissingSisapDependencyError(RuntimeError):
     pass
 
 
-def _copy_sisap_embedding_metadata(source_dir: Path, target_dir: Path, dataset: str, tira_dataset: str):
+def _copy_sisap_embedding_metadata(
+    source_dir: Path,
+    target_dir: Path,
+    dataset: str,
+    tira_dataset: str | None,
+    embedding_tira_id: str | None = None,
+):
     metadata_files = {
         source_dir / "doc" / "doc-ir-metadata.yml": target_dir / "doc-ir-metadata.yml",
         source_dir / "query" / "query-ir-metadata.yml": target_dir / "query-ir-metadata.yml",
@@ -34,9 +41,24 @@ def _copy_sisap_embedding_metadata(source_dir: Path, target_dir: Path, dataset: 
         {"data": {"test collection": {"name": "/tira-data/input"}}},
         {"data": {"test collection": {"name": dataset}}},
     )
+    embedding_model_metadata = {}
+    if embedding_tira_id:
+        tira = Client()
+        _, embedding_team, embedding_system = embedding_tira_id.split("/", 2)
+        system_details = tira.public_system_details(embedding_team, embedding_system)
+        embedding_model_metadata = {
+            "embedding-model": system_details["command"].split("--model")[1].strip(),
+            "tira-embedding-software": embedding_tira_id
+        }
+
     for metadata_path in metadata_files.values():
         content = yaml.safe_load(metadata_path.read_text())
         content["data"]["test collection"]["tira-id"] = tira_dataset
+        if embedding_tira_id is not None:
+            content["data"]["embedding model"] = {
+                "tira-id": embedding_tira_id,
+                **embedding_model_metadata,
+            }
         metadata_path.write_text(yaml.safe_dump(content))
     (target_dir / "doc-ir-metadata.yml").replace(target_dir / "document-embedding-metadata.yml")
     (target_dir / "query-ir-metadata.yml").replace(target_dir / "query-embedding-metadata.yml")
@@ -97,7 +119,12 @@ def sisap_to_qrels(truths: Path, output: Path):
     print(ret)
 
 
-def export_embeddings_to_sisap(source_dir: Path, target_dir: Path, dataset: str) -> Path:
+def export_embeddings_to_sisap(
+    source_dir: Path,
+    target_dir: Path,
+    dataset: str,
+    embedding_tira_id: str | None = None,
+) -> Path:
     h5py = _import_h5py()
     target_dir.mkdir(parents=True, exist_ok=False)
 
@@ -157,7 +184,13 @@ def export_embeddings_to_sisap(source_dir: Path, target_dir: Path, dataset: str)
     _write_json_gz(target_dir / "query-id-to-index.json.gz", {query_id: idx for idx, query_id in enumerate(query_ids)})
     _write_json_gz(target_dir / "document-id-to-index.json.gz", {doc_id: idx for idx, doc_id in enumerate(doc_ids)})
 
-    _copy_sisap_embedding_metadata(source_dir, target_dir, dataset, IR_DATASET_TO_TIRA_DATASET.get(dataset))
+    _copy_sisap_embedding_metadata(
+        source_dir,
+        target_dir,
+        dataset,
+        IR_DATASET_TO_TIRA_DATASET.get(dataset),
+        embedding_tira_id=embedding_tira_id,
+    )
 
     return target_dir
 

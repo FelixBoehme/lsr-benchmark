@@ -11,6 +11,7 @@ from click.testing import CliRunner
 
 from lsr_benchmark import main, register_to_ir_datasets
 from lsr_benchmark._commands import _download
+from lsr_benchmark._commands import sisap_io as sisap_io_module
 from lsr_benchmark._commands.sisap_io import (
     MissingSisapDependencyError,
     _decreasing_scores_for_ranking,
@@ -219,7 +220,15 @@ def test_download_embeddings_cli_supports_sisap_format(tmp_path, monkeypatch):
             assert dataset_name == "aila-casedocs-20260426-training"
             return _write_embedding_dir(tmp_path / "source")
 
+        def public_system_details(self, team_name, system_name):
+            assert team_name == "lightning-ir"
+            assert system_name == "naver-splade-v3"
+            return {
+                "command": "/lightning-ir.py --dataset $inputDataset --save_dir $outputDir --model naver/splade-v3",
+            }
+
     monkeypatch.setattr(_download, "Client", FakeClient)
+    monkeypatch.setattr(sisap_io_module, "Client", FakeClient)
 
     runner = CliRunner()
     target_dir = tmp_path / "target"
@@ -243,13 +252,27 @@ def test_download_embeddings_cli_supports_sisap_format(tmp_path, monkeypatch):
     assert (target_dir / "config.json").exists()
     assert yaml.safe_load((target_dir / "document-embedding-metadata.yml").read_text()) == {
         "tag": "test-tag",
-        "data": {"test collection": {"name": "rteb/aila/casedocs", "tira-id": "aila-casedocs-20260426-training"}},
+        "data": {
+            "test collection": {"name": "rteb/aila/casedocs", "tira-id": "aila-casedocs-20260426-training"},
+            "embedding model": {
+                "tira-id": "lsr-benchmark/lightning-ir/naver-splade-v3",
+                "embedding-model": "naver/splade-v3",
+                "tira-embedding-software": "lsr-benchmark/lightning-ir/naver-splade-v3",
+            },
+        },
         "implementation": {"script": {"path": "/run.py"}},
         "doc-metadata": True,
     }
     assert yaml.safe_load((target_dir / "query-embedding-metadata.yml").read_text()) == {
         "tag": "test-tag",
-        "data": {"test collection": {"name": "rteb/aila/casedocs", "tira-id": "aila-casedocs-20260426-training"}},
+        "data": {
+            "test collection": {"name": "rteb/aila/casedocs", "tira-id": "aila-casedocs-20260426-training"},
+            "embedding model": {
+                "tira-id": "lsr-benchmark/lightning-ir/naver-splade-v3",
+                "embedding-model": "naver/splade-v3",
+                "tira-embedding-software": "lsr-benchmark/lightning-ir/naver-splade-v3",
+            },
+        },
         "implementation": {"script": {"path": "/run.py"}},
         "query-metadata": True,
     }
@@ -259,6 +282,9 @@ def test_download_embeddings_cli_reports_missing_sisap_dependency(tmp_path, monk
     class FakeClient:
         def get_run_output(self, system_name, dataset_name):
             return _write_embedding_dir(tmp_path / "source")
+
+        def public_system_details(self, team_name, system_name):
+            return {"display_name": "Naver SPLADE v3"}
 
     def fail_to_export(*args, **kwargs):
         raise MissingSisapDependencyError(

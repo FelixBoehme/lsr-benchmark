@@ -41,13 +41,14 @@ def download_embeddings(dataset, embedding, out, export_format):
     tira = Client()
     engine = EMBEDDING_MODEL_TO_ENGINE.get(embedding, "lightning-ir")
     tira_dataset = IR_DATASET_TO_TIRA_DATASET[dataset]
-    source_dir = Path(tira.get_run_output(f'lsr-benchmark/{engine}/{embedding}', tira_dataset))
+    embedding_id = f'lsr-benchmark/{engine}/{embedding}'
+    source_dir = Path(tira.get_run_output(embedding_id, tira_dataset))
     ret = source_dir
     if export_format == "sisap":
         if out is None:
             raise click.UsageError("--out is required when --format sisap is used.")
         try:
-            ret = export_embeddings_to_sisap(source_dir, Path(out), dataset)
+            ret = export_embeddings_to_sisap(source_dir, Path(out), dataset, embedding_id)
         except MissingSisapDependencyError as exc:
             raise click.ClickException(str(exc)) from exc
     elif out is not None:
