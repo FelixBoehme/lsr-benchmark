@@ -28,8 +28,13 @@ DATASET_TO_MAPPING = {
     "trec-robust-2004-fold-3-20250926-test": "d14",
     "trec-robust-2004-fold-4-20250926-test": "d15",
     "trec-robust-2004-fold-5-20250926-test": "d16",
+    "aila-casedocs-20260426-training": "d17",
+    "aila-statutes-20260426-training": "d18",
+    "financebench-retrieval-20260427-training": "d19",
+    "legal-summarization-20260427-training": "d20",
 }
 
+MAPPING_TO_DATASET = {v: k for k, v in DATASET_TO_MAPPING.items()}
 
 def get_embedding_path(embedding: str, dataset_id: str, tira: Client) -> Path | None:
     if embedding.lower() != "none" and embedding not in all_dense_embeddings():
