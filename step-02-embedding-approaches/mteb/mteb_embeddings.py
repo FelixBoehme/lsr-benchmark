@@ -5,10 +5,9 @@ import numpy as np
 from tirex_tracker import register_metadata, tracking
 import lsr_benchmark
 from lsr_benchmark.click import option_lsr_dataset
-from lsr_benchmark.datasets import TIRA_DATASET_ID_TO_IR_DATASET_ID
 import ir_datasets
 
-from mteb import get_model, get_task
+from mteb import get_model
 from mteb._create_dataloaders import create_dataloader
 from mteb.abstasks.task_metadata import TaskMetadata
 from mteb.types import PromptType
@@ -38,8 +37,8 @@ def truncate_texts(texts, truncate_length=TRUNCATE_LENGTH):
 def resolve_task_metadata() -> TaskMetadata:
     """The MTEB TaskMetadata that drives prompt selection. We always use the same prompt"""
     return TaskMetadata(
-        dataset={"path": f"lsr-benchmark/generic", "revision": "1"},
-        name=f"lsr-benchmark/generic",
+        dataset={"path": "lsr-benchmark/generic", "revision": "1"},
+        name="lsr-benchmark/generic",
         description="Generic lsr-benchmark retrieval task.",
         prompt="Given a web search query, retrieve relevant passages that answer the query",
         type="Retrieval",

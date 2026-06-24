@@ -11,7 +11,6 @@ import shutil
 import yaml
 from tira.io_utils import docker_supported_target_platform
 import os
-from platform import system
 
 
 def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platform=None):
@@ -172,15 +171,15 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
     approach_to_execution = get_approach_to_execution(approaches, platform, embedding, print_message)
 
     if len(dataset) == 0:
-        print_message(f"No datasets are passed.", FormatMsgType.ERROR)
+        print_message("No datasets are passed.", FormatMsgType.ERROR)
         return 1
 
     if len(embedding) == 0:
-        print_message(f"No embedding are passed.", FormatMsgType.ERROR)
+        print_message("No embedding are passed.", FormatMsgType.ERROR)
         return 1
 
     if len(approaches) == 0:
-        print_message(f"No approaches are passed.", FormatMsgType.ERROR)
+        print_message("No approaches are passed.", FormatMsgType.ERROR)
         return 1
 
     stats = {}
