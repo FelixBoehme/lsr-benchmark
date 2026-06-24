@@ -1,4 +1,5 @@
 import click
+from pathlib import Path
 from tira.rest_api_client import Client
 from lsr_benchmark.datasets import (
     all_embeddings, all_dense_embeddings, all_ir_datasets,
