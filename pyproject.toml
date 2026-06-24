@@ -40,9 +40,11 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
+sisap = ["h5py"]
 test = [
     "approvaltests",
     "evaluate",
+    "h5py",
     "parameterized",
     "pyterrier~=1.0",
     "pytest~=8.0",

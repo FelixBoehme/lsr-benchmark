@@ -199,7 +199,10 @@ class LsrBenchmarkDataset(Dataset):
                     except Exception:
                         # Dataser could no be found on TIRA, fallback to ir_datasets
                         import ir_datasets
-                        ds = ir_datasets.load(TIRA_DATASET_ID_TO_IR_DATASET_ID[ir_datasets_id])
+                        if ir_datasets_id in TIRA_DATASET_ID_TO_IR_DATASET_ID:
+                            ds = ir_datasets.load(TIRA_DATASET_ID_TO_IR_DATASET_ID[ir_datasets_id])
+                        else:
+                            ds = ir_datasets.load(ir_datasets_id)
                         yield from ds.qrels_iter()
                     else:
                         yield from super().qrels_iter()

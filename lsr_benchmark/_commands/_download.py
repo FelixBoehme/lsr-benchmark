@@ -6,6 +6,8 @@ from lsr_benchmark.datasets import (
 )
 from shutil import copytree
 
+from .sisap_io import MissingSisapDependencyError, export_embeddings_to_sisap
+
 
 @click.option(
     "--dataset",
@@ -25,12 +27,29 @@ from shutil import copytree
     default=None,
     help="The output directory to write to.",
 )
-def download_embeddings(dataset, embedding, out):
+@click.option(
+    "--format",
+    "export_format",
+    type=click.Choice(["reneuir", "sisap"]),
+    required=False,
+    multiple=False,
+    default="reneuir",
+    help="The output format to write.",
+)
+def download_embeddings(dataset, embedding, out, export_format):
     tira = Client()
     engine = EMBEDDING_MODEL_TO_ENGINE.get(embedding, "lightning-ir")
     tira_dataset = IR_DATASET_TO_TIRA_DATASET[dataset]
-    ret = tira.get_run_output(f'lsr-benchmark/{engine}/{embedding}', tira_dataset)
-    if out is not None:
+    source_dir = Path(tira.get_run_output(f'lsr-benchmark/{engine}/{embedding}', tira_dataset))
+    ret = source_dir
+    if export_format == "sisap":
+        if out is None:
+            raise click.UsageError("--out is required when --format sisap is used.")
+        try:
+            ret = export_embeddings_to_sisap(source_dir, Path(out), dataset)
+        except MissingSisapDependencyError as exc:
+            raise click.ClickException(str(exc)) from exc
+    elif out is not None:
         copytree(ret, out)
         ret = out
     print(ret)
