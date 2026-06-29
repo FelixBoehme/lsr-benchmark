@@ -111,28 +111,6 @@ class ChoiceOrPath(click.ParamType):
             ctx
         )
 
-class DatasetChoice(click.ParamType):
-    def __init__(self, choices):
-        self.choices = tuple(choices)
-
-    def get_metavar(self, param, ctx):
-        return f"[{'|'.join(self.choices)}|concatenation using '+']"
-
-    def convert(self, value, param, ctx):
-        if value in self.choices:
-            return value
-
-        choices_str = ", ".join([f"'{choice}'" for choice in self.choices])
-        for v in value.split("+"):
-            if v not in self.choices:
-                self.fail(
-                    f"{v!r} is not one of "
-                    f"{choices_str} or a concatenation.",
-                    param,
-                    ctx
-                )
-        return value
-
 @click.argument(
     "approaches",
     type=str,
@@ -147,7 +125,7 @@ class DatasetChoice(click.ParamType):
 )
 @click.option(
     "--dataset",
-    type=DatasetChoice(["all"] + all_datasets()),
+    type=ChoiceOrPath(["all"] + all_datasets()),
     multiple=True,
     help="The datasets to run on.",
 )
@@ -208,7 +186,12 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
     for d in dataset:
         for e in embedding:
             for approach in approaches:
-                out_dir = Path(out) / d / e / approach
+                dir, emb = d, e
+                if isinstance(d, Path):
+                    dir = d.stem
+                if isinstance(e, Path):
+                    emb = e.stem
+                out_dir = Path(out) / dir / emb / approach
                 try:
                     run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir, platform=platform)
                     if approach not in stats:
