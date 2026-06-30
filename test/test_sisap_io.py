@@ -253,10 +253,12 @@ def test_download_embeddings_cli_supports_sisap_format(tmp_path, monkeypatch):
     assert yaml.safe_load((target_dir / "document-embedding-metadata.yml").read_text()) == {
         "tag": "test-tag",
         "data": {
-            "test collection": {"name": "rteb/aila/casedocs", "tira-id": "aila-casedocs-20260426-training"},
+            "test collection": {
+                "name": "aila-casedocs-20260426-training",
+                "ir-datasets-id": "rteb/aila/casedocs",
+            },
             "embedding model": {
-                "tira-id": "lsr-benchmark/lightning-ir/naver-splade-v3",
-                "embedding-model": "naver/splade-v3",
+                "name": "naver/splade-v3",
                 "tira-embedding-software": "lsr-benchmark/lightning-ir/naver-splade-v3",
             },
         },
@@ -266,10 +268,12 @@ def test_download_embeddings_cli_supports_sisap_format(tmp_path, monkeypatch):
     assert yaml.safe_load((target_dir / "query-embedding-metadata.yml").read_text()) == {
         "tag": "test-tag",
         "data": {
-            "test collection": {"name": "rteb/aila/casedocs", "tira-id": "aila-casedocs-20260426-training"},
+            "test collection": {
+                "name": "aila-casedocs-20260426-training",
+                "ir-datasets-id": "rteb/aila/casedocs",
+            },
             "embedding model": {
-                "tira-id": "lsr-benchmark/lightning-ir/naver-splade-v3",
-                "embedding-model": "naver/splade-v3",
+                "name": "naver/splade-v3",
                 "tira-embedding-software": "lsr-benchmark/lightning-ir/naver-splade-v3",
             },
         },
