@@ -66,25 +66,19 @@ def get_approach_to_execution(approaches, platform, embedding, print_message):
         if approach in EXAMPLE_RETRIEVAL_ENGINE[platform]:
             approach_to_execution[approach] = {"tag": EXAMPLE_RETRIEVAL_ENGINE[platform][approach]["image"], "command": EXAMPLE_RETRIEVAL_ENGINE[platform][approach]["command"]}
         else:
-            approach_path = Path(approach)
-            if not approach_path.is_dir():
-                approach_path = Path(__file__).resolve().parents[2] / "step-03-retrieval-approaches" / approach
-            if not approach_path.is_dir():
-                raise ValueError(
-                    f"Approach '{approach}' is neither a predefined engine nor a directory "
-                    f"(looked in '{approach}' and 'step-03-retrieval-approaches/{approach}')."
-                )
-            docker_tag, zipped_code, remotes, commit, active_branch = tira.build_docker_image_from_code(
-                approach_path, log_message, False, platform=platform
-            )
-            if docker_tag in approach_to_execution.values():
-                raise ValueError(f"Approach {approach} produces a docker tag that is already used by another approach.")
-            cmd = (approach_path / "README.md").read_text().split("tira-cli code-submission")[1].split('--command')[1].split("'")[1]
+            software_def = None
+            candidates = [approach + "-" + platform.split("/")[1]]
+            for c in candidates:
+                try:
+                    tira.public_system_details("reneuir-baselines", c)
+                    break
+                except Error:
+                    pass
 
-            log_message(f"Approach {approach} is compiled.", FormatMsgType.OK)
-            system_tag = run_foo(docker_tag, cmd, 'tiny-example-20251002_0-training', embedding[0], platform=platform)
-            print_message(f"Approach {approach} compiled and produced valid outputs on example dataset (tag={system_tag}).", FormatMsgType.OK)
-            approach_to_execution[approach] = {"tag": docker_tag, "command": cmd}
+            if software_def is None:
+                software_def = tira.public_system_details("reneuir-baselines", candidates[-1])
+
+            approach_to_execution[approach] = {"tag": software_def["public_image_name"], "command": software_def["command"]}
 
     return approach_to_execution
 
