@@ -173,9 +173,15 @@ def __get_dataset_name(metadata: Dict[str, Any]) -> str:
     return list(candidates)[0]
 
 
-def __get_embedding_name(p: Path):
+def __get_embedding_name(p: Path, metadata):
     # FIXME read this from metadata
     ret = []
+
+    
+    for k, m in metadata.items():
+        if "data" in m and "embedding model" in m["data"]:
+            return m["data"]["embedding model"]["name"]
+
     for embedding in all_embeddings():
         if embedding in str(Path(p)).split("/"):
             ret += [embedding]
@@ -232,7 +238,7 @@ def evaluate_approach(approach: str, measure: list[str]):
     ret["tira-dataset-id"] = dataset
     ret["ir-dataset-id"] = TIRA_DATASET_ID_TO_IR_DATASET_ID.get(dataset)
     ret["approach"] = approach
-    ret["embedding/model"] = __get_embedding_name(approach)
+    ret["embedding/model"] = __get_embedding_name(approach, metadata)
     return ret
 
 
@@ -246,8 +252,7 @@ def evaluate_approach(approach: str, measure: list[str]):
     type=__parse_measure,
     required=False,
     multiple=True,
-    default=["ndcg_cut.10", "nDCG(judged_only=True)@10", "P_10", "RR", "runtime_wallclock", "energy_total",
-             "temperature_avg", "temperature_max"],
+    default=["ndcg_cut.10", "nDCG(judged_only=True)@10", "P_10", "RR", "runtime_wallclock", "energy_total"],
     help="The dataset id or a local directory.",
 )
 @click.option(

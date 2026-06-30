@@ -39,7 +39,7 @@ def _copy_sisap_embedding_metadata(
     patch_ir_metadata(
         str(target_dir),
         {"data": {"test collection": {"name": "/tira-data/input"}}},
-        {"data": {"test collection": {"name": dataset}}},
+        {"data": {"test collection": {"name": tira_dataset}}},
     )
     embedding_model_metadata = {}
     if embedding_tira_id:
@@ -47,18 +47,15 @@ def _copy_sisap_embedding_metadata(
         _, embedding_team, embedding_system = embedding_tira_id.split("/", 2)
         system_details = tira.public_system_details(embedding_team, embedding_system)
         embedding_model_metadata = {
-            "embedding-model": system_details["command"].split("--model")[1].strip(),
+            "name": system_details["command"].split("--model")[1].strip(),
             "tira-embedding-software": embedding_tira_id
         }
 
     for metadata_path in metadata_files.values():
         content = yaml.safe_load(metadata_path.read_text())
-        content["data"]["test collection"]["tira-id"] = tira_dataset
+        content["data"]["test collection"]["ir-datasets-id"] = dataset
         if embedding_tira_id is not None:
-            content["data"]["embedding model"] = {
-                "tira-id": embedding_tira_id,
-                **embedding_model_metadata,
-            }
+            content["data"]["embedding model"] = embedding_model_metadata
         metadata_path.write_text(yaml.safe_dump(content))
     (target_dir / "doc-ir-metadata.yml").replace(target_dir / "document-embedding-metadata.yml")
     (target_dir / "query-ir-metadata.yml").replace(target_dir / "query-embedding-metadata.yml")

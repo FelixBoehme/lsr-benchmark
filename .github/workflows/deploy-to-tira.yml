@@ -39,7 +39,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Install TIRA Client
         run: |
-          pip3 install 'git+https://github.com/tira-io/tira.git@main#subdirectory=python-client'
+          pip3 install 'git+https://github.com/tira-io/tira.git@auto-judge-workflow#subdirectory=python-client'
 
       - name: Publish to TIRA
         run: |
