@@ -54,18 +54,21 @@ def prefix_json(file, out, prefix: str, field: str, desc: str = "") -> None:
             out.write(json.dumps(record) + "\n")
 
 
-def quantize(embeddings: np.ndarray, level: int) -> np.ndarray:
+def quantize(embeddings: np.ndarray, level: int, keep_datatype) -> np.ndarray:
     match level:
         case 1 | 2 | 4:
             normalized = (embeddings - embeddings.min()) / (embeddings.max() - embeddings.min())
             quantized = np.round(normalized * (2**level - 1)).astype(np.int8)
-            return quantized
+            res = quantized
         case 8:
-            return (embeddings * 255).astype(np.uint8)
+            res = (embeddings * 255).astype(np.uint8)
         case 16:
-            return embeddings.astype(np.float16)
+            res = embeddings.astype(np.float16)
         case _:
             raise ValueError(f"Quantizing to {level} bits is not supported.")
+    if keep_datatype:
+        res = res.astype(embeddings.dtype)
+    return res
 
 
 def load_and_merge_embeddings(
@@ -94,6 +97,21 @@ def load_and_merge_embeddings(
         "indptr": np.concatenate(all_indptr),
     }
 
+def get_quantization_suffix(quant_level: bool, keep_datatype: bool):
+    res = None
+    if quant_level == 16:
+        res = "-fp16"
+    elif quant_level is not None:
+        res = f"-q{quant_level}"
+    else:
+        return ""
+
+    if keep_datatype:
+        res += "-original-dtype"
+
+    return res
+
+
 
 @click.argument(
     "datasets",
@@ -119,7 +137,14 @@ def load_and_merge_embeddings(
     multiple=True,
     help="Number of bits to quantize data to"
 )
-def modify_data(datasets: list[str], embedding: list[str], join: bool, quantization: list[int]) -> int:
+@click.option(
+    "-k",
+    "--keep-datatype",
+    type=bool,
+    is_flag=True,
+    help="Whether to keep the original datatype the same regardless of quantization"
+)
+def modify_data(datasets: list[str], embedding: list[str], join: bool, quantization: list[int], keep_datatype) -> int:
     if not join and not quantization:
         raise click.UsageError("No modification chosen! Aborting.")
 
@@ -157,7 +182,7 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
                 merged_embeddings = load_and_merge_embeddings(embedding_paths, emb_file)
 
                 for quant_level in quantization or [None]:
-                    suffix = "-fp16" if quant_level == 16 else f"-q{quant_level}" if quant_level is not None else ""
+                    suffix = get_quantization_suffix(quant_level, keep_datatype)
                     emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_mappings}{suffix}/{emb}")
                     (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
                     (emb_result_path / "query").mkdir(exist_ok=True)
@@ -166,7 +191,7 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
 
                     np.savez_compressed(
                         emb_result_path / emb_file,
-                        data=quantize(merged_embeddings["data"], quant_level)
+                        data=quantize(merged_embeddings["data"], quant_level, keep_datatype)
                         if quant_level
                         else merged_embeddings["data"],
                         indices=merged_embeddings["indices"],
@@ -174,7 +199,7 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
                     )
 
             for quant_level in quantization or [None]:
-                suffix = "-fp16" if quant_level == 16 else f"-q{quant_level}" if quant_level is not None else ""
+                suffix = get_quantization_suffix(quant_level, keep_datatype)
                 emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_mappings}{suffix}/{emb}")
                 for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
                     with open(emb_result_path / id_file, "w") as out:
@@ -189,7 +214,7 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
                     data = load_and_merge_embeddings([emb_path], emb_file)
 
                     for quant_level in quantization:
-                        suffix = "-fp16" if quant_level == 16 else f"-q{quant_level}"
+                        suffix = get_quantization_suffix(quant_level, keep_datatype)
                         emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}{suffix}/{emb}")
                         (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
                         (emb_result_path / "query").mkdir(exist_ok=True)
@@ -198,13 +223,13 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
 
                         np.savez_compressed(
                             emb_result_path / emb_file,
-                            data=quantize(data["data"], quant_level),
+                            data=quantize(data["data"], quant_level, keep_datatype),
                             indices=data["indices"],
                             indptr=data["indptr"],
                         )
 
                 for quant_level in quantization:
-                    suffix = "-fp16" if quant_level == 16 else f"-q{quant_level}"
+                    suffix = get_quantization_suffix(quant_level, keep_datatype)
                     emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}{suffix}/{emb}")
                     for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
                         shutil.copy(emb_path / id_file, emb_result_path / id_file)
