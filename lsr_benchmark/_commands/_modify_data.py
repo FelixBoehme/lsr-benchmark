@@ -1,6 +1,7 @@
 import gzip
 import json
 import shutil
+import yaml
 from pathlib import Path
 
 import click
@@ -9,32 +10,34 @@ from tira.rest_api_client import Client
 from tira.third_party_integrations import default_tira_cache_dir
 from tqdm import tqdm
 
-from lsr_benchmark.datasets import all_dense_embeddings, all_embeddings
+from lsr_benchmark.datasets import all_datasets, all_dense_embeddings, all_embeddings
 
-DATASET_TO_MAPPING = {
-    "tiny-example-20251002_0-training": "d1",
-    "trec-18-web-20251008-test": "d2",
-    "trec-19-web-20251008-test": "d3",
-    "trec-20-web-20251008-test": "d4",
-    "trec-21-web-20251008-test": "d5",
-    "trec-22-web-20251008-test": "d6",
-    "trec-23-web-20251008-test": "d7",
-    "trec-28-deep-learning-passages-20250926-training": "d8",
-    "trec-28-misinfo-20251008_1-test": "d9",
-    "trec-29-deep-learning-passages-20250926-training": "d10",
-    "trec-33-rag-20250926_1-training": "d11",
-    "trec-robust-2004-fold-1-20250927-test": "d12",
-    "trec-robust-2004-fold-2-20250926-test": "d13",
-    "trec-robust-2004-fold-3-20250926-test": "d14",
-    "trec-robust-2004-fold-4-20250926-test": "d15",
-    "trec-robust-2004-fold-5-20250926-test": "d16",
-    "aila-casedocs-20260426-training": "d17",
-    "aila-statutes-20260426-training": "d18",
-    "financebench-retrieval-20260427-training": "d19",
-    "legal-summarization-20260427-training": "d20",
+JOINT_TO_DATASETS = {
+    "msmarco-passage-trec-dl-2019+2020-judged": [
+        "trec-28-deep-learning-passages-20250926-training",
+        "trec-29-deep-learning-passages-20250926-training",
+    ],
+    "disks45-nocr-trec-robust-2004-fold1+2+3+4+5": [
+        "trec-robust-2004-fold-1-20250927-test",
+        "trec-robust-2004-fold-2-20250926-test",
+        "trec-robust-2004-fold-3-20250926-test",
+        "trec-robust-2004-fold-4-20250926-test",
+        "trec-robust-2004-fold-5-20250926-test",
+    ],
+    "clueweb12-trec-web-2013+2014+clueweb12-b13-trec-misinfo-2019": [
+        "trec-22-web-20251008-test",
+        "trec-23-web-20251008-test",
+        "trec-28-misinfo-20251008_1-test",
+    ],
+    "clueweb09-en-trec-web-2009+2010+2011+2012": [
+        "clueweb09/en/trec-web-2009",
+        "clueweb09/en/trec-web-2010",
+        "clueweb09/en/trec-web-2011",
+        "clueweb09/en/trec-web-2012",
+    ],
 }
 
-MAPPING_TO_DATASET = {v: k for k, v in DATASET_TO_MAPPING.items()}
+# TODO: add option to keep original datatype, add metadata (signal joint data, embedding metadata)
 
 def get_embedding_path(embedding: str, dataset_id: str, tira: Client) -> Path | None:
     if embedding.lower() != "none" and embedding not in all_dense_embeddings():
@@ -111,11 +114,29 @@ def get_quantization_suffix(quant_level: bool, keep_datatype: bool):
 
     return res
 
+def modify_metadata(src: Path, dest: Path, level: int, keep_datatype: bool) -> None:
+    """Reads a YAML metadata file, adds quantization details, and writes to dest."""
+    with open(src, "r") as f:
+        meta = yaml.safe_load(f) or {}
+
+    prefix = None
+    match level:
+        case 1 | 2 | 4 | 8:
+            prefix = "q"
+        case 16:
+            prefix = "fp"
+        case _:
+            pass
+
+    meta["data"]["quantization"] = f"{prefix}{level}"
+
+    with open(dest, "w") as f:
+        yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
 
 
 @click.argument(
     "datasets",
-    type=click.Choice(list(DATASET_TO_MAPPING.keys())),
+    type=click.Choice(list(JOINT_TO_DATASETS.keys()) + list(all_datasets())),
     nargs=-1
 )
 @click.option(
@@ -147,68 +168,93 @@ def get_quantization_suffix(quant_level: bool, keep_datatype: bool):
 def modify_data(datasets: list[str], embedding: list[str], join: bool, quantization: list[int], keep_datatype) -> int:
     if not join and not quantization:
         raise click.UsageError("No modification chosen! Aborting.")
+    elif join:
+        for d in datasets:
+            if d not in JOINT_TO_DATASETS:
+                choices_str = ", ".join([f"'{choice}'" for choice in JOINT_TO_DATASETS.keys()])
+                raise click.UsageError(f"Can't create joint dataset {d!r}.\nChoose one of {choices_str}")
 
     tira = Client()
-    mappings = [DATASET_TO_MAPPING[d] for d in datasets]
-    joint_mappings = "-".join(sorted(mappings))
     tira_dir = default_tira_cache_dir()
-
-    click.echo("Downloading/Verifying datasets...")
-    dataset_paths = [tira.download_dataset("lsr-benchmark", d) for d in tqdm(datasets, desc="Datasets")]
 
     created_dataset_dirs = set()
     created_embedding_dirs = set()
 
     if join:
-        join_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{joint_mappings}/")
-        join_path.mkdir(exist_ok=True, parents=True)
-        created_dataset_dirs.add(join_path)
+        for joint_name in tqdm(datasets, desc="Joint Datasets"):
+            individual_datasets = JOINT_TO_DATASETS[joint_name]
+            mappings = [f"d{i}" for i in range(len(individual_datasets))]
 
-        with open(join_path / "queries.jsonl", "w") as out:
-            for i, (mapping, path) in tqdm(enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Queries"):
-                with open(path / "queries.jsonl", "r") as file:
-                    prefix_json(file, out, mapping, "qid", desc=f"Prefixing {datasets[i]}")
+            click.echo("Downloading/Verifying datasets...")
+            dataset_paths = [tira.download_dataset("lsr-benchmark", d) for d in tqdm(individual_datasets, desc="Datasets")]
 
-        with gzip.open(join_path / "corpus.jsonl.gz", "wt") as out:
-            for i, (mapping, path) in tqdm(enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Corpora"):
-                with gzip.open(path / "corpus.jsonl.gz", "rt") as file:
-                    prefix_json(file, out, mapping, "doc_id", desc=f"Prefixing {datasets[i]}")
+            join_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{joint_name}/")
+            join_path.mkdir(exist_ok=True, parents=True)
+            created_dataset_dirs.add(join_path)
 
-    for emb in tqdm(embedding, desc="Processing Embeddings"):
-        embedding_paths = [get_embedding_path(emb, d, tira) for d in datasets]
+            with open(join_path / "queries.jsonl", "w") as out:
+                for i, (mapping, path) in tqdm(enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Queries"):
+                    with open(path / "queries.jsonl", "r") as file:
+                        prefix_json(file, out, mapping, "qid", desc=f"Prefixing {individual_datasets[i]}")
 
-        if join:
-            for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
-                merged_embeddings = load_and_merge_embeddings(embedding_paths, emb_file)
+            with gzip.open(join_path / "corpus.jsonl.gz", "wt") as out:
+                for i, (mapping, path) in tqdm(enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Corpora"):
+                    with gzip.open(path / "corpus.jsonl.gz", "rt") as file:
+                        prefix_json(file, out, mapping, "doc_id", desc=f"Prefixing {individual_datasets[i]}")
+
+            for emb in tqdm(embedding, desc="Processing Embeddings"):
+                embedding_paths = [get_embedding_path(emb, d, tira) for d in individual_datasets]
+
+                for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
+                    merged_embeddings = load_and_merge_embeddings(embedding_paths, emb_file)
+
+                    for quant_level in quantization or [None]:
+                        suffix = get_quantization_suffix(quant_level, keep_datatype)
+                        emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_name}{suffix}/{emb}")
+                        (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
+                        (emb_result_path / "query").mkdir(exist_ok=True)
+
+                        created_embedding_dirs.add(emb_result_path)
+
+                        np.savez_compressed(
+                            emb_result_path / emb_file,
+                            data=quantize(merged_embeddings["data"], quant_level, keep_datatype)
+                            if quant_level
+                            else merged_embeddings["data"],
+                            indices=merged_embeddings["indices"],
+                            indptr=merged_embeddings["indptr"],
+                        )
 
                 for quant_level in quantization or [None]:
                     suffix = get_quantization_suffix(quant_level, keep_datatype)
-                    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_mappings}{suffix}/{emb}")
-                    (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
-                    (emb_result_path / "query").mkdir(exist_ok=True)
+                    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_name}{suffix}/{emb}")
 
-                    created_embedding_dirs.add(emb_result_path)
+                    for folder in ["doc", "query"]:
+                        id_file = f"{folder}/{folder}-ids.txt"
+                        with open(emb_result_path / id_file, "w") as out:
+                            for mapping, path in zip(mappings, embedding_paths):
+                                with open(path / id_file, "r") as file:
+                                    for line in file:
+                                        out.write(f"{mapping}-{line.strip()}\n")
 
-                    np.savez_compressed(
-                        emb_result_path / emb_file,
-                        data=quantize(merged_embeddings["data"], quant_level, keep_datatype)
-                        if quant_level
-                        else merged_embeddings["data"],
-                        indices=merged_embeddings["indices"],
-                        indptr=merged_embeddings["indptr"],
-                    )
-
-            for quant_level in quantization or [None]:
-                suffix = get_quantization_suffix(quant_level, keep_datatype)
-                emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{joint_mappings}{suffix}/{emb}")
-                for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
-                    with open(emb_result_path / id_file, "w") as out:
+                        meta_file = f"{folder}/{folder}-ir-metadata.yml"
+                        meta_out_dir = emb_result_path / folder
                         for mapping, path in zip(mappings, embedding_paths):
-                            with open(path / id_file, "r") as file:
-                                for line in file:
-                                    out.write(f"{mapping}-{line.strip()}\n")
+                            src_meta = path / meta_file
+                            if src_meta.exists():
+                                dest_meta = meta_out_dir / f"{mapping}-{folder}-ir-metadata.yml"
+                                if quant_level:
+                                    modify_metadata(src_meta, dest_meta, quant_level, keep_datatype)
+                                else:
+                                    shutil.copy(src_meta, dest_meta)
 
-        elif quantization:
+    elif quantization:
+        click.echo("Downloading/Verifying datasets...")
+        dataset_paths = [tira.download_dataset("lsr-benchmark", d) for d in tqdm(datasets, desc="Datasets")]
+
+        for emb in tqdm(embedding, desc="Processing Embeddings"):
+            embedding_paths = [get_embedding_path(emb, d, tira) for d in datasets]
+
             for dataset, emb_path in tqdm(zip(datasets, embedding_paths), total=len(datasets), desc=f"Quantizing {emb}", leave=False):
                 for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
                     data = load_and_merge_embeddings([emb_path], emb_file)
@@ -231,8 +277,13 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool, quantizat
                 for quant_level in quantization:
                     suffix = get_quantization_suffix(quant_level, keep_datatype)
                     emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}{suffix}/{emb}")
-                    for id_file in ["doc/doc-ids.txt", "query/query-ids.txt"]:
+
+                    for folder in ["doc", "query"]:
+                        id_file = f"{folder}/{folder}-ids.txt"
                         shutil.copy(emb_path / id_file, emb_result_path / id_file)
+
+                        meta_file = f"{folder}/{folder}-ir-metadata.yml"
+                        modify_metadata(emb_path / meta_file, emb_result_path / meta_file, quant_level, keep_datatype)
 
     click.echo("\nFollowing paths have been created:")
     if created_dataset_dirs:
