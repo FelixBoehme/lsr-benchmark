@@ -37,8 +37,6 @@ JOINT_TO_DATASETS = {
     ],
 }
 
-# TODO: add option to keep original datatype, add metadata (signal joint data, embedding metadata)
-
 def get_embedding_path(embedding: str, dataset_id: str, tira: Client) -> Path | None:
     if embedding.lower() != "none" and embedding not in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f"lsr-benchmark/lightning-ir/{embedding}", dataset_id)
@@ -117,7 +115,7 @@ def get_quantization_suffix(quant_level: bool, keep_datatype: bool):
 def modify_metadata(src: Path, dest: Path, level: int, keep_datatype: bool) -> None:
     """Reads a YAML metadata file, adds quantization details, and writes to dest."""
     with open(src, "r") as f:
-        meta = yaml.safe_load(f) or {}
+        meta = yaml.safe_load(f)
 
     prefix = None
     match level:
@@ -128,7 +126,7 @@ def modify_metadata(src: Path, dest: Path, level: int, keep_datatype: bool) -> N
         case _:
             pass
 
-    meta["data"]["quantization"] = f"{prefix}{level}"
+    meta["data"]["test collection"]["quantization"] = f"{prefix}{level}"
 
     with open(dest, "w") as f:
         yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
