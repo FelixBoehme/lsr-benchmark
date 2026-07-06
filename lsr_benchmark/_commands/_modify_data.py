@@ -127,6 +127,7 @@ def modify_metadata(src: Path, dest: Path, level: int, keep_datatype: bool) -> N
             pass
 
     meta["data"]["test collection"]["quantization"] = f"{prefix}{level}"
+    meta["data"]["test collection"]["keep_datatype"] = keep_datatype
 
     with open(dest, "w") as f:
         yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
