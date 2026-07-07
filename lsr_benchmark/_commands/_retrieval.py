@@ -204,15 +204,6 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
                     dset = d.stem
                 if isinstance(e, Path):
                     emb = e.stem
-                    if dset in JOINT_TO_DATASETS:
-                        file_name = "d0-doc-ir-metadata.yml"
-                    else:
-                        file_name = "doc-ir-metadata.yml"
-                    with open(e / "doc" / file_name) as f:
-                        meta = yaml.safe_load(f)
-                    quant_suffix = f"-{meta['data']['test collection']['quantization']}"
-                    if meta["data"]["test collection"]["keep_datatype"]:
-                        quant_suffix += "-original-dtype"
                 out_dir = Path(out) / (dset + quant_suffix) / emb / approach
                 try:
                     run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir, platform=platform)
