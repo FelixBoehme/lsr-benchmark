@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 import numpy as np
+import yaml
 from tira.rest_api_client import Client
 from tira.third_party_integrations import default_tira_cache_dir
 from tqdm import tqdm
@@ -65,6 +66,23 @@ def prefix_json(file, out, prefix: str, field: str, desc: str = "") -> None:
             out.write(json.dumps(record) + "\n")
 
 
+def quantize(embeddings: np.ndarray, level: int, keep_datatype) -> np.ndarray:
+    match level:
+        case 1 | 2 | 4:
+            normalized = (embeddings - embeddings.min()) / (embeddings.max() - embeddings.min())
+            quantized = np.round(normalized * (2**level - 1)).astype(np.int8)
+            res = quantized
+        case 8:
+            res = (embeddings * 255).astype(np.uint8)
+        case 16:
+            res = embeddings.astype(np.float16)
+        case _:
+            raise ValueError(f"Quantizing to {level} bits is not supported.")
+    if keep_datatype:
+        res = res.astype(embeddings.dtype)
+    return res
+
+
 def load_and_merge_embeddings(
     embedding_paths: list[Path],
     data_dir: str,
@@ -90,6 +108,42 @@ def load_and_merge_embeddings(
         "indices": np.concatenate(all_indices),
         "indptr": np.concatenate(all_indptr),
     }
+
+
+def get_quantization_suffix(quant_level: bool, keep_datatype: bool):
+    res = None
+    if quant_level == 16:
+        res = "-fp16"
+    elif quant_level is not None:
+        res = f"-q{quant_level}"
+    else:
+        return ""
+
+    if keep_datatype:
+        res += "-original-dtype"
+
+    return res
+
+
+def modify_metadata(src: Path, dest: Path, level: int, keep_datatype: bool) -> None:
+    """Reads a YAML metadata file, adds quantization details, and writes to dest."""
+    with open(src, "r") as f:
+        meta = yaml.safe_load(f)
+
+    prefix = None
+    match level:
+        case 1 | 2 | 4 | 8:
+            prefix = "q"
+        case 16:
+            prefix = "fp"
+        case _:
+            pass
+
+    meta["data"]["test collection"]["quantization"] = f"{prefix}{level}"
+    meta["data"]["test collection"]["keep_datatype"] = keep_datatype
+
+    with open(dest, "w") as f:
+        yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
 
 
 def perform_dataset_join(dataset: str, tira: Client, tira_dir: str) -> Path:
@@ -155,6 +209,41 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
     return emb_result_path
 
 
+def perform_quantization(
+    dataset: str, embedding: str, quantization: int, tira: Client, tira_dir: str, keep_datatype: bool
+) -> list[Path]:
+    # TODO: check if embedding is local
+    embedding_path = get_embedding_path(embedding, dataset, tira)
+
+    suffix = get_quantization_suffix(quantization, keep_datatype)
+    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}{suffix}/{embedding}")
+    (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
+    (emb_result_path / "query").mkdir(exist_ok=True)
+
+    for emb_file in ["doc/doc-embeddings.npz"]:
+        data = load_and_merge_embeddings([embedding_path], emb_file)
+
+        np.savez_compressed(
+            emb_result_path / emb_file,
+            data=quantize(data["data"], quantization, keep_datatype),
+            indices=data["indices"],
+            indptr=data["indptr"],
+        )
+        shutil.copy(embedding_path / "query/query-embeddings.npz", emb_result_path / "query/query-embeddings.npz")
+
+    for quant_level in quantization:
+        suffix = get_quantization_suffix(quant_level, keep_datatype)
+        emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}{suffix}/{embedding}")
+
+        for folder in ["doc", "query"]:
+            id_file = f"{folder}/{folder}-ids.txt"
+            shutil.copy(embedding_path / id_file, emb_result_path / id_file)
+
+            meta_file = f"{folder}/{folder}-ir-metadata.yml"
+            modify_metadata(embedding_path / meta_file, emb_result_path / meta_file, quant_level, keep_datatype)
+    return emb_result_path
+
+
 @click.argument("datasets", type=click.Choice(list(JOINT_TO_DATASETS.keys()) + list(all_datasets())), nargs=-1)
 @click.option(
     "--embedding",
@@ -163,9 +252,25 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
     multiple=True,
     help="The embeddings to run on",
 )
-@click.option("-j", "--join", is_flag=True, required=True)
-def modify_data(datasets: list[str], embedding: list[str], join: bool) -> int:
-    if join:
+@click.option("-j", "--join", is_flag=True)
+@click.option(
+    "-q",
+    "--quantization",
+    type=click.Choice([1, 2, 4, 8, 16]),
+    multiple=True,
+    help="Number of bits to quantize data to",
+)
+@click.option(
+    "-k",
+    "--keep-datatype",
+    type=bool,
+    is_flag=True,
+    help="Whether to keep the original datatype the same regardless of quantization",
+)
+def modify_data(datasets: list[str], embedding: list[str], join: bool, quantization: list[int], keep_datatype) -> int:
+    if not join and not quantization:
+        raise click.UsageError("No modification chosen! Aborting.")
+    elif join:
         for d in datasets:
             if d not in JOINT_TO_DATASETS:
                 choices_str = ", ".join([f"'{choice}'" for choice in JOINT_TO_DATASETS.keys()])
@@ -182,6 +287,13 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool) -> int:
             created_dataset_dirs.append(perform_dataset_join(dataset, tira, tira_dir))
             for emb in tqdm(embedding, desc="Processing Embeddings"):
                 created_embedding_dirs.append(perform_embedding_join(dataset, emb, tira, tira_dir))
+
+    elif quantization:
+        for dataset in tqdm(datasets, desc="Quantizing"):
+            for emb in tqdm(embedding, desc="Processing Embeddings"):
+                created_embedding_dirs.append(
+                    perform_quantization(dataset, emb, quantization, tira, tira_dir, keep_datatype)
+                )
 
     click.echo("\nFollowing paths have been created:")
     if created_dataset_dirs:
