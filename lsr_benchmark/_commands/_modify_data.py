@@ -1,53 +1,79 @@
 import gzip
 import json
 import shutil
+from enum import Enum
 from pathlib import Path
 
 import click
 import numpy as np
 from tira.rest_api_client import Client
-from tira.third_party_integrations import default_tira_cache_dir
+from tira.third_party_integrations import default_tira_cache_dir, temporary_directory
 from tqdm import tqdm
 
 from lsr_benchmark.datasets import all_datasets, all_dense_embeddings, all_embeddings
 
+
+class DuplicateBehaviour(Enum):
+    FAIL = 1
+    SKIP = 2
+    PREFIX = 3
+
+
+class DuplicateHandling:
+    def __init__(
+        self, docs: DuplicateBehaviour = DuplicateBehaviour.FAIL, queries: DuplicateBehaviour = DuplicateBehaviour.FAIL
+    ):
+        self.doc = docs
+        self.query = queries
+
+
 JOINT_TO_DATASETS = {
-    "msmarco-passage-trec-dl-2019+2020-judged": [
-        "trec-28-deep-learning-passages-20250926-training",
-        "trec-29-deep-learning-passages-20250926-training",
-    ],
-    "disks45-nocr-trec-robust-2004-fold1+2+3+4+5": [
-        "trec-robust-2004-fold-1-20250927-test",
-        "trec-robust-2004-fold-2-20250926-test",
-        "trec-robust-2004-fold-3-20250926-test",
-        "trec-robust-2004-fold-4-20250926-test",
-        "trec-robust-2004-fold-5-20250926-test",
-    ],
-    "clueweb12-trec-web-2013+2014+clueweb12-b13-trec-misinfo-2019": [
-        "trec-22-web-20251008-test",
-        "trec-23-web-20251008-test",
-        "trec-28-misinfo-20251008_1-test",
-    ],
-    "clueweb09-en-trec-web-2009+2010+2011+2012": [
-        "clueweb09/en/trec-web-2009",
-        "clueweb09/en/trec-web-2010",
-        "clueweb09/en/trec-web-2011",
-        "clueweb09/en/trec-web-2012",
-    ],
+    "msmarco-passage-trec-dl-2019+2020-judged": {
+        "settings": DuplicateHandling(docs=DuplicateBehaviour.SKIP),
+        "datasets": [
+            "trec-28-deep-learning-passages-20250926-training",
+            "trec-29-deep-learning-passages-20250926-training",
+        ],
+    },
+    "disks45-nocr-trec-robust-2004-fold1+2+3+4+5": {
+        "settings": DuplicateHandling(),
+        "datasets": [
+            "trec-robust-2004-fold-1-20250927-test",
+            "trec-robust-2004-fold-2-20250926-test",
+            "trec-robust-2004-fold-3-20250926-test",
+            "trec-robust-2004-fold-4-20250926-test",
+            "trec-robust-2004-fold-5-20250926-test",
+        ],
+    },
+    "clueweb12-trec-web-2013+2014+clueweb12-b13-trec-misinfo-2019": {
+        "settings": DuplicateHandling(),
+        "datasets": [
+            "trec-22-web-20251008-test",
+            "trec-23-web-20251008-test",
+            "trec-28-misinfo-20251008_1-test",
+        ],
+    },
+    "clueweb09-en-trec-web-2009+2010+2011+2012": {
+        "settings": DuplicateHandling(),
+        "datasets": [
+            "clueweb09/en/trec-web-2009",
+            "clueweb09/en/trec-web-2010",
+            "clueweb09/en/trec-web-2011",
+            "clueweb09/en/trec-web-2012",
+        ],
+    },
 }
 
 
 def get_embedding_path(embedding: str, dataset_id: str, tira: Client) -> Path:
-    if embedding in set(
-        [
-            "e5-mistral-7b-instruct",
-            "SFR-Embedding-Mistral",
-            "Linq-Embed-Mistral",
-            "Octen-Embedding-8B",
-            "Qwen3-Embedding-8B",
-            "speed-embedding-7b-instruct",
-        ]
-    ):
+    if embedding in {
+        "e5-mistral-7b-instruct",
+        "SFR-Embedding-Mistral",
+        "Linq-Embed-Mistral",
+        "Octen-Embedding-8B",
+        "Qwen3-Embedding-8B",
+        "speed-embedding-7b-instruct",
+    }:
         embeddings_dir = tira.get_run_output(f"lsr-benchmark/mteb/{embedding}", dataset_id)
     elif embedding in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f"lsr-benchmark/sentence-transformers/{embedding}", dataset_id)
@@ -57,22 +83,38 @@ def get_embedding_path(embedding: str, dataset_id: str, tira: Client) -> Path:
     return embeddings_dir
 
 
-def prefix_json(file, out, prefix: str, field: str, desc: str = "") -> None:
+def prefix_json(
+    file, out, behaviour: DuplicateBehaviour, field: str, seen_ids: set[str], prefix: str, desc: str = ""
+) -> None:
     for line in tqdm(file, desc=desc, leave=False, unit=" lines"):
-        if line.strip():
-            record = json.loads(line)
-            record[field] = f"{prefix}-{record[field]}"
-            out.write(json.dumps(record) + "\n")
+        if not line.strip():
+            continue
+
+        record = json.loads(line)
+        record_field = record[field]
+
+        if behaviour == DuplicateBehaviour.FAIL:
+            if record_field in seen_ids:
+                raise ValueError(f"Duplicate {field} '{record_field}' found while joining datasets.")
+            seen_ids.add(record_field)
+        elif behaviour == DuplicateBehaviour.PREFIX:
+            record[field] = f"{prefix}-{record_field}"
+        elif behaviour == DuplicateBehaviour.SKIP:
+            if record_field in seen_ids:
+                continue
+            seen_ids.add(record_field)
+
+        out.write(json.dumps(record) + "\n")
 
 
 def load_and_merge_embeddings(
     embedding_paths: list[Path],
     data_dir: str,
+    keep_masks: list[np.ndarray],
 ) -> dict[str, np.ndarray]:
     all_data = []
     all_indices = []
-    all_indptr = []
-    current_offset = 0
+    all_row_lengths = []
 
     for i, emb_path in enumerate(tqdm(embedding_paths, desc=f"Loading {data_dir}", leave=False)):
         with np.load(emb_path / data_dir) as npz:
@@ -80,77 +122,148 @@ def load_and_merge_embeddings(
             indices = npz["indices"]
             indptr = npz["indptr"]
 
-            all_data.append(data)
-            all_indices.append(indices)
-            all_indptr.append(indptr if i == 0 else indptr[1:] + current_offset)
-            current_offset += len(data)
+        mask = keep_masks[i]
+        row_lengths = np.diff(indptr)
+
+        if not mask.all():
+            element_mask = np.repeat(mask, row_lengths)
+            data = data[element_mask]
+            indices = indices[element_mask]
+            row_lengths = row_lengths[mask]
+
+        all_data.append(data)
+        all_indices.append(indices)
+        all_row_lengths.append(row_lengths)
+
+    merged_row_lengths = np.concatenate(all_row_lengths)
+    merged_indptr = np.empty(len(merged_row_lengths) + 1, dtype=np.int64)
+    merged_indptr[0] = 0
+    np.cumsum(merged_row_lengths, out=merged_indptr[1:])
 
     return {
         "data": np.concatenate(all_data),
         "indices": np.concatenate(all_indices),
-        "indptr": np.concatenate(all_indptr),
+        "indptr": merged_indptr,
     }
 
 
 def perform_dataset_join(dataset: str, tira: Client, tira_dir: str) -> Path:
-    individual_datasets = JOINT_TO_DATASETS[dataset]
+    join_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{dataset}/")
+
+    if join_path.exists():
+        return join_path
+
+    joint_dataset = JOINT_TO_DATASETS[dataset]
+    individual_datasets = joint_dataset["datasets"]
+    duplicate_behaviour = joint_dataset["settings"]
     mappings = [f"d{i}" for i in range(len(individual_datasets))]
 
     dataset_paths = [tira.download_dataset("lsr-benchmark", d) for d in tqdm(individual_datasets, desc="Datasets")]
 
-    join_path = Path(f"{tira_dir}/extracted_datasets/lsr-benchmark/{dataset}/")
-    join_path.mkdir(exist_ok=True, parents=True)
+    tmp = temporary_directory()
 
-    with open(join_path / "queries.jsonl", "w") as out:
+    seen_ids = set()
+    with open(tmp / "queries.jsonl", "w") as out:
         for i, (mapping, path) in tqdm(
             enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Queries"
         ):
             with open(path / "queries.jsonl", "r") as file:
-                prefix_json(file, out, mapping, "qid", desc=f"Prefixing {individual_datasets[i]}")
+                prefix_json(
+                    file,
+                    out,
+                    duplicate_behaviour.query,
+                    "qid",
+                    seen_ids,
+                    mapping,
+                    desc=f"Prefixing {individual_datasets[i]}",
+                )
 
-    with gzip.open(join_path / "corpus.jsonl.gz", "wt") as out:
+    seen_ids = set()
+    with gzip.open(tmp / "corpus.jsonl.gz", "wt") as out:
         for i, (mapping, path) in tqdm(
             enumerate(zip(mappings, dataset_paths)), total=len(mappings), desc="Joining Corpora"
         ):
             with gzip.open(path / "corpus.jsonl.gz", "rt") as file:
-                prefix_json(file, out, mapping, "doc_id", desc=f"Prefixing {individual_datasets[i]}")
+                prefix_json(
+                    file,
+                    out,
+                    duplicate_behaviour.doc,
+                    "doc_id",
+                    seen_ids,
+                    mapping,
+                    desc=f"Prefixing {individual_datasets[i]}",
+                )
+
+    shutil.copytree(tmp, join_path)
 
     return join_path
 
 
 def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir: str) -> Path:
-    individual_datasets = JOINT_TO_DATASETS[dataset]
+    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}/{embedding}")
+
+    if emb_result_path.exists():
+        return emb_result_path
+
+    joint_dataset = JOINT_TO_DATASETS[dataset]
+    individual_datasets = joint_dataset["datasets"]
+    duplicate_handling = joint_dataset["settings"]
     mappings = [f"d{i}" for i in range(len(individual_datasets))]
 
     embedding_paths = [get_embedding_path(embedding, d, tira) for d in individual_datasets]
 
-    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}/{embedding}")
-    (emb_result_path / "doc").mkdir(parents=True, exist_ok=True)
-    (emb_result_path / "query").mkdir(exist_ok=True)
+    tmp = temporary_directory()
+    (tmp / "doc").mkdir(parents=True, exist_ok=True)
+    (tmp / "query").mkdir(exist_ok=True)
+    keep_masks = {"doc": [], "query": []}
 
-    for emb_file in ["doc/doc-embeddings.npz", "query/query-embeddings.npz"]:
-        merged_embeddings = load_and_merge_embeddings(embedding_paths, emb_file)
+    for emb_type in ["doc", "query"]:
+        id_file = f"{emb_type}/{emb_type}-ids.txt"
+        behaviour = getattr(duplicate_handling, emb_type)
+        seen_ids = set()
+        with open(tmp / id_file, "w") as out:
+            for mapping, path in zip(mappings, embedding_paths):
+                mask = []
+                with open(path / id_file, "r") as file:
+                    for line in file:
+                        id = line.strip()
+                        out_line = f"{id}\n"
+                        keep = True
+                        if behaviour == DuplicateBehaviour.FAIL:
+                            if id in seen_ids:
+                                raise ValueError(f"Duplicate id '{line}' found while joining embeddings.")
+                            seen_ids.add(id)
+                        elif behaviour == DuplicateBehaviour.PREFIX:
+                            out_line = f"{mapping}-{id}\n"
+                        elif behaviour == DuplicateBehaviour.SKIP:
+                            if id in seen_ids:
+                                keep = False
+                            else:
+                                seen_ids.add(id)
+
+                        mask.append(keep)
+                        if keep:
+                            out.write(out_line)
+
+                keep_masks[emb_type].append(np.array(mask, dtype=bool))
+
+        meta_file = f"{emb_type}/{emb_type}-ir-metadata.yml"
+        meta_out_dir = tmp / emb_type
+        for mapping, path in zip(mappings, embedding_paths):
+            src_meta = path / meta_file
+            dest_meta = meta_out_dir / f"{mapping}-{emb_type}-ir-metadata.yml"
+            shutil.copy(src_meta, dest_meta)
+
+    for emb_type, emb_file in [("doc", "doc/doc-embeddings.npz"), ("query", "query/query-embeddings.npz")]:
+        merged_embeddings = load_and_merge_embeddings(embedding_paths, emb_file, keep_masks[emb_type])
         np.savez_compressed(
-            emb_result_path / emb_file,
+            tmp / emb_file,
             data=merged_embeddings["data"],
             indices=merged_embeddings["indices"],
             indptr=merged_embeddings["indptr"],
         )
 
-    for folder in ["doc", "query"]:
-        id_file = f"{folder}/{folder}-ids.txt"
-        with open(emb_result_path / id_file, "w") as out:
-            for mapping, path in zip(mappings, embedding_paths):
-                with open(path / id_file, "r") as file:
-                    for line in file:
-                        out.write(f"{mapping}-{line.strip()}\n")
-
-        meta_file = f"{folder}/{folder}-ir-metadata.yml"
-        meta_out_dir = emb_result_path / folder
-        for mapping, path in zip(mappings, embedding_paths):
-            src_meta = path / meta_file
-            dest_meta = meta_out_dir / f"{mapping}-{folder}-ir-metadata.yml"
-            shutil.copy(src_meta, dest_meta)
+    shutil.copytree(tmp, emb_result_path)
 
     return emb_result_path
 
