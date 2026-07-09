@@ -7,6 +7,7 @@ from tira.rest_api_client import Client
 from pathlib import Path
 from lsr_benchmark.datasets import all_embeddings, all_dense_embeddings, all_datasets
 from lsr_benchmark._commands._verify_installation import EXAMPLE_RETRIEVAL_ENGINE
+from lsr_benchmark._commands._modify_data import JOINT_TO_DATASETS
 import shutil
 import yaml
 from tira.io_utils import docker_supported_target_platform
@@ -17,7 +18,12 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platf
     if output_dir is not None and Path(output_dir).exists():
         return
     tira = Client()
-    dataset_path = temporary_directory()
+    if isinstance(dataset_id, Path):
+        dataset_path = dataset_id.resolve()
+        dataset_id = dataset_id.stem
+    else:
+        dataset_path = temporary_directory()
+
     if isinstance(embedding, Path):
         embeddings_dir = embedding.resolve()
     elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
@@ -49,13 +55,20 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platf
         raise ValueError(msg)
 
     tag = yaml.safe_load((Path(tmp_dir) / "retrieval-metadata.yml").read_text())["tag"]
-    
+
     if output_dir is not None:
         from tira.io_utils import patch_ir_metadata
         output_dir.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(tmp_dir, output_dir)
         patch_ir_metadata(output_dir, {"data": {"test collection": {"name": "/tira-data/input"}}}, {"data": {"test collection": {"name": dataset_id}}})
-    
+        if dataset_id in JOINT_TO_DATASETS:
+            for meta_file in ["index-metadata.yml", "retrieval-metadata.yml"]:
+                with open(output_dir/meta_file, "r") as f:
+                    meta = yaml.safe_load(f)
+                meta["data"]["test collection"]["union of subsamples"] = JOINT_TO_DATASETS[dataset_id]
+                with open(output_dir/meta_file, "w") as f:
+                    yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
+
     return tag
 
 
@@ -119,7 +132,7 @@ class ChoiceOrPath(click.ParamType):
 )
 @click.option(
     "--dataset",
-    type=click.Choice(["all"] + all_datasets()),
+    type=ChoiceOrPath(["all"] + all_datasets()),
     multiple=True,
     help="The datasets to run on.",
 )
@@ -138,6 +151,11 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
         print(' '.join([sys.argv[0].split('/')[-1]] + sys.argv[1:]))
         for message, level in all_messages:
             log_message(message, level)
+
+    for d in dataset:
+        for e in embedding:
+            if isinstance(d, Path) and not isinstance(e, Path):
+                raise click.UsageError("A local dataset has to be used in combination with local embeddings! Aborting.")
 
     if dataset is None or not dataset or "all" in dataset:
         dataset = all_datasets()
@@ -180,17 +198,23 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
     for d in dataset:
         for e in embedding:
             for approach in approaches:
-                out_dir = Path(out) / d / e / approach
+                dset, emb = d, e
+                quant_suffix = ""
+                if isinstance(d, Path):
+                    dset = d.stem
+                if isinstance(e, Path):
+                    emb = e.stem
+                out_dir = Path(out) / (dset + quant_suffix) / emb / approach
                 try:
                     run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir, platform=platform)
                     if approach not in stats:
                         stats[approach] = {"embeddings": set(), "datasets": set()}
-                    stats[approach]["embeddings"].add(e)
-                    stats[approach]["datasets"].add(d)
+                    stats[approach]["embeddings"].add(emb)
+                    stats[approach]["datasets"].add(dset)
                 except Exception:  # noqa: S112
                     continue
 
     for approach in stats:
         print_message(f"Approach {approach} produced valid outputs on {len(stats[approach]['datasets'])} datasets for {len(stats[approach]['embeddings'])} embeddings.", FormatMsgType.OK)
-    
+
     return 0

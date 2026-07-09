@@ -11,6 +11,7 @@ from ._commands._retrieval import retrieval
 from ._commands._download import download_embeddings, download_run
 from ._commands._verify_installation import verify_installation
 from ._commands.sisap_io import sisap_to_qrels, sisap_to_trec_run
+from ._commands._modify_data import modify_data
 from .datasets import TIRA_DATASET_ID_TO_IR_DATASET_ID, IR_DATASET_TO_TIRA_DATASET, SUPPORTED_IR_DATASETS
 import os
 
@@ -30,7 +31,7 @@ def register_to_ir_datasets(dataset=None):
     elif dataset and dataset in IR_DATASET_TO_TIRA_DATASET:
         if ("lsr-benchmark/" + dataset) not in registry:
             ds = build_dataset(IR_DATASET_TO_TIRA_DATASET[dataset], False)
-            
+
             if IR_DATASET_TO_TIRA_DATASET[dataset] not in registry:
                 registry.register(IR_DATASET_TO_TIRA_DATASET[dataset], ds)
             registry.register("lsr-benchmark/" + dataset, ds)
@@ -99,7 +100,7 @@ def overview():
         df_dataset += [{"Dataset": TIRA_DATASET_ID_TO_IR_DATASET_ID.get(dataset_id, dataset_id), "Text": f(int(stats['dataset-size'])), "Avg. Embeddings": f(embeddings_for_dataset/len(overall_embeddings))}]
     df_dataset = pd.DataFrame(df_dataset)
     df_dataset.index = ['']*len(df_dataset)
-    
+
     df_embeddings = []
     for k, v in model_to_size.items():
         df_embeddings += [{"Model": k, "Size (avg)": f(v/len(overall_embeddings))}]
@@ -118,6 +119,7 @@ main.command()(retrieval)
 main.command()(verify_installation)
 main.add_command(sisap_to_trec_run)
 main.add_command(sisap_to_qrels)
+main.command()(modify_data)
 
 if __name__ == '__main__':
     main()
