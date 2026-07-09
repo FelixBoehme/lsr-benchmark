@@ -36,7 +36,7 @@ JOINT_TO_DATASETS = {
         ],
     },
     "disks45-nocr-trec-robust-2004-fold1+2+3+4+5": {
-        "settings": DuplicateHandling(),
+        "settings": DuplicateHandling(docs=DuplicateBehaviour.SKIP),
         "datasets": [
             "trec-robust-2004-fold-1-20250927-test",
             "trec-robust-2004-fold-2-20250926-test",
@@ -46,7 +46,7 @@ JOINT_TO_DATASETS = {
         ],
     },
     "clueweb12-trec-web-2013+2014+clueweb12-b13-trec-misinfo-2019": {
-        "settings": DuplicateHandling(),
+        "settings": DuplicateHandling(docs=DuplicateBehaviour.SKIP, queries=DuplicateBehaviour.PREFIX),
         "datasets": [
             "trec-22-web-20251008-test",
             "trec-23-web-20251008-test",
@@ -54,7 +54,7 @@ JOINT_TO_DATASETS = {
         ],
     },
     "clueweb09-en-trec-web-2009+2010+2011+2012": {
-        "settings": DuplicateHandling(),
+        "settings": DuplicateHandling(docs=DuplicateBehaviour.SKIP),
         "datasets": [
             "clueweb09/en/trec-web-2009",
             "clueweb09/en/trec-web-2010",
