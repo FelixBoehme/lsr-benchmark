@@ -3,9 +3,11 @@ import json
 import shutil
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 import click
 import numpy as np
+import yaml
 from tira.rest_api_client import Client
 from tira.third_party_integrations import default_tira_cache_dir, temporary_directory
 from tqdm import tqdm
@@ -268,6 +270,47 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
     return emb_result_path
 
 
+# TODO: add option for percentile ranges
+def perform_quantization(embedding_path: Path, precision: Literal["int8", "uint8", "binary"]) -> Path:
+    tmp = temporary_directory()
+    (tmp / "doc").mkdir(parents=True, exist_ok=True)
+    (tmp / "query").mkdir(exist_ok=True)
+    for directory in ["doc", "query"]:
+        dirPath = f"{directory}/{directory}-embeddings.npz"
+        with np.load(embedding_path / dirPath) as npz:
+            data = npz["data"]
+            indices = npz["indices"]
+            indptr = npz["indptr"]
+
+        n = len(indptr) - 1
+        d = indptr[1] - indptr[0]
+        data = data.reshape(n, d)
+
+        if precision.endswith("int8"):
+            min = np.min(data, axis=0)
+            max = np.max(data, axis=0)
+            scale = (max - min) / 255
+            scale = np.where(scale == 0, 1, scale)
+
+            data = np.floor((data - min) / scale)
+
+            if precision == "uint8":
+                data = data.astype(np.uint8)
+            elif precision == "int8":
+                data = (data - 128).astype(np.int8)
+
+        np.savez_compressed(tmp / dirPath, data=data.flatten(), indices=indices, indptr=indptr)
+        shutil.copy(embedding_path / directory / f"{directory}-ids.txt", tmp / directory)
+
+        with open(embedding_path / directory / f"{directory}-ir-metadata.yml", "r") as f:
+            meta = yaml.safe_load(f)
+        meta["data"]["test collection"]["quantization"] = precision
+        with open(tmp / directory / f"{directory}-ir-metadata.yml", "w") as f:
+            yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
+
+    return tmp
+
+
 @click.argument("datasets", type=click.Choice(list(JOINT_TO_DATASETS.keys()) + list(all_datasets())), nargs=-1)
 @click.option(
     "--embedding",
@@ -276,8 +319,18 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
     multiple=True,
     help="The embeddings to run on",
 )
-@click.option("-j", "--join", is_flag=True, required=True)
-def modify_data(datasets: list[str], embedding: list[str], join: bool) -> int:
+@click.option("-j", "--join", is_flag=True)
+@click.option(
+    "-q",
+    "--quantization",
+    type=click.Choice(["fp16", "int8", "uint8", "binary"]),
+    multiple=True,
+    help="Number of bits to quantize data to",
+)
+def modify_data(datasets: list[str], embedding: list[str], join: bool, quantization: list[int]) -> int:
+    if not join and not quantization:
+        raise click.UsageError("No modification chosen! Aborting.")
+
     if join:
         for d in datasets:
             if d not in JOINT_TO_DATASETS:
@@ -290,11 +343,19 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool) -> int:
     created_dataset_dirs = []
     created_embedding_dirs = []
 
+    # TODO: maybe add try catch
     if join:
         for dataset in tqdm(datasets, desc="Joining"):
             created_dataset_dirs.append(perform_dataset_join(dataset, tira, tira_dir))
             for emb in tqdm(embedding, desc="Processing Embeddings"):
                 created_embedding_dirs.append(perform_embedding_join(dataset, emb, tira, tira_dir))
+        # TODO: potentially quantize after joining
+    elif quantization:
+        for dataset in tqdm(datasets, desc="Quantizing"):
+            for emb in tqdm(embedding, desc="Processing Embeddings"):
+                emb_path = get_embedding_path(emb, dataset, tira)
+                for level in quantization:
+                    created_embedding_dirs.append(perform_quantization(emb_path, level))
 
     click.echo("\nFollowing paths have been created:")
     if created_dataset_dirs:
