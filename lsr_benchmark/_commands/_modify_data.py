@@ -3,9 +3,11 @@ import json
 import shutil
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 import click
 import numpy as np
+import yaml
 from tira.rest_api_client import Client
 from tira.third_party_integrations import default_tira_cache_dir, temporary_directory
 from tqdm import tqdm
@@ -268,6 +270,82 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
     return emb_result_path
 
 
+def perform_quantization(
+    embedding_path: Path,
+    precision: Literal["fp16", "int8", "uint8", "ternary", "binary"],
+    quant_range: int | None,
+    dataset: str,
+    embedding: str,
+    tira_dir: str,
+) -> Path:
+    range_suffix = f"-{quant_range}" if quant_range and precision.endswith("int8") else ""
+    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}-{precision}{range_suffix}/{embedding}")
+
+    if emb_result_path.exists():
+        return emb_result_path
+
+    tmp = temporary_directory()
+    (tmp / "doc").mkdir(parents=True, exist_ok=True)
+    (tmp / "query").mkdir(exist_ok=True)
+    for directory in ["doc", "query"]:
+        dirPath = f"{directory}/{directory}-embeddings.npz"
+        with np.load(embedding_path / dirPath) as npz:
+            data = npz["data"]
+            indices = npz["indices"]
+            indptr = npz["indptr"]
+
+        if precision == "fp16":
+            data = data.astype(np.float16)
+
+        if precision.endswith("int8"):
+            n = len(indptr) - 1
+            d = indptr[1] - indptr[0]
+            data = data.reshape(n, d)
+
+            if quant_range:
+                min = np.percentile(data, 100 - quant_range, axis=0)
+                max = np.percentile(data, quant_range, axis=0)
+            else:
+                min = np.min(data, axis=0)
+                max = np.max(data, axis=0)
+
+            scale = (max - min) / 255
+            scale = np.where(scale == 0, 1, scale)
+
+            data = np.clip(np.floor((data - min) / scale), 0, 255)
+            data = data.flatten()
+
+            if precision == "uint8":
+                data = data.astype(np.uint8)
+            elif precision == "int8":
+                data = (data - 128).astype(np.int8)
+
+        if precision == "ternary":
+            data = np.sign(data).astype(np.int8)
+
+        if precision == "binary":
+            data = (data > 0).astype(np.int8)
+
+        np.savez_compressed(tmp / dirPath, data=data, indices=indices, indptr=indptr)
+        shutil.copy(embedding_path / directory / f"{directory}-ids.txt", tmp / directory)
+
+        if dataset in JOINT_TO_DATASETS:
+            nmb_of_datasets = len(JOINT_TO_DATASETS[dataset]["datasets"])
+            meta_files = [f"d{i}-{directory}-ir-metadata.yml" for i in range(nmb_of_datasets)]
+        else:
+            meta_files = [f"{directory}-ir-metadata.yml"]
+        for file in meta_files:
+            with open(embedding_path / directory / file, "r") as f:
+                meta = yaml.safe_load(f)
+            meta["data"]["test collection"]["quantization"] = precision
+            with open(tmp / directory / file, "w") as f:
+                yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
+
+    shutil.copytree(tmp, emb_result_path)
+
+    return emb_result_path
+
+
 @click.argument("datasets", type=click.Choice(list(JOINT_TO_DATASETS.keys()) + list(all_datasets())), nargs=-1)
 @click.option(
     "--embedding",
@@ -276,8 +354,23 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
     multiple=True,
     help="The embeddings to run on",
 )
-@click.option("-j", "--join", is_flag=True, required=True)
-def modify_data(datasets: list[str], embedding: list[str], join: bool) -> int:
+@click.option("-j", "--join", is_flag=True)
+@click.option(
+    "-q",
+    "--quantization",
+    type=click.Choice(["fp16", "int8", "uint8", "ternary", "binary"]),
+    multiple=True,
+    help="Number of bits to quantize data to",
+)
+@click.option(
+    "-r", "--quant-range", type=int, help="Percentage of values to include while quantizing to avoid outliers"
+)
+def modify_data(
+    datasets: list[str], embedding: list[str], join: bool, quantization: list[str], quant_range: int | None
+) -> int:
+    if not join and not quantization:
+        raise click.UsageError("No modification chosen! Aborting.")
+
     if join:
         for d in datasets:
             if d not in JOINT_TO_DATASETS:
@@ -295,6 +388,22 @@ def modify_data(datasets: list[str], embedding: list[str], join: bool) -> int:
             created_dataset_dirs.append(perform_dataset_join(dataset, tira, tira_dir))
             for emb in tqdm(embedding, desc="Processing Embeddings"):
                 created_embedding_dirs.append(perform_embedding_join(dataset, emb, tira, tira_dir))
+    if quantization:
+        for dataset in tqdm(datasets, desc="Quantizing"):
+            for emb in tqdm(embedding, desc="Processing Embeddings"):
+                if dataset in JOINT_TO_DATASETS:
+                    emb_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}/{emb}")
+                    if not emb_path.exists():
+                        raise click.UsageError(
+                            f"'{emb}' embeddings don't exist yet for '{dataset}'. Retry with '-j' or '--join'. Aborting!"
+                        )
+                else:
+                    emb_path = get_embedding_path(emb, dataset, tira)
+
+                for level in quantization:
+                    created_embedding_dirs.append(
+                        perform_quantization(emb_path, level, quant_range, dataset, emb, tira_dir)
+                    )
 
     click.echo("\nFollowing paths have been created:")
     if created_dataset_dirs:
