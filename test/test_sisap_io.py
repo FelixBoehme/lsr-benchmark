@@ -153,7 +153,7 @@ def _assert_sisap_bundle_structure(bundle_dir: Path, *, expect_mappings: bool):
         assert query_group.attrs["shape"][0] == len(query_group["indptr"]) - 1
         assert query_group.attrs["shape"][1] == train_group.attrs["shape"][1]
 
-        assert otest_group.attrs["algo"] == "exact-scipy-sparse-mm"
+        assert otest_group.attrs["algo"]
         assert otest_group.attrs["querytime"] == 0.0
 
         assert knns.shape == dists.shape
@@ -175,9 +175,59 @@ def _assert_sisap_bundle_structure(bundle_dir: Path, *, expect_mappings: bool):
         assert not document_mapping_path.exists()
 
 
-def test_export_embeddings_to_sisap_writes_expected_bundle(tmp_path):
+def _write_mock_run_file(
+    path: Path,
+    rows: list[tuple[str, str, int, float, str]],
+) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as output_file:
+        for query_id, doc_id, rank, score, software in rows:
+            output_file.write(f"{query_id} Q0 {doc_id} {rank} {score} {software}\n")
+    return path
+
+
+def _default_mock_run_rows(
+    query_ids: list[str],
+    doc_ids: list[str],
+    software: str = "ground-truth",
+) -> list[tuple[str, str, int, float, str]]:
+    rows = []
+    for query_id in query_ids:
+        for rank, doc_id in enumerate(doc_ids, start=1):
+            rows.append((query_id, doc_id, rank, float(len(doc_ids) - rank + 1), software))
+    return rows
+
+
+def _mock_ground_truth_run_writer(
+    monkeypatch,
+    rows: list[tuple[str, str, int, float, str]] | None = None,
+):
+    def fake_write_ground_truth_run_file(source_dir: Path, target_dir: Path, dataset: str) -> Path:
+        assert source_dir.exists()
+        assert dataset
+        query_ids = (source_dir / "query" / "query-ids.txt").read_text().strip().splitlines()
+        doc_ids = (source_dir / "doc" / "doc-ids.txt").read_text().strip().splitlines()
+        run_rows = rows if rows is not None else _default_mock_run_rows(query_ids, doc_ids)
+        target_dir.mkdir(parents=True, exist_ok=False)
+        return _write_mock_run_file(target_dir / "run.txt.gz", run_rows)
+
+    monkeypatch.setattr(sisap_io_module, "_write_ground_truth_run_file", fake_write_ground_truth_run_file)
+
+
+def test_export_embeddings_to_sisap_writes_expected_bundle(tmp_path, monkeypatch):
     source_dir = _write_embedding_dir(tmp_path / "source")
     target_dir = tmp_path / "target"
+    _mock_ground_truth_run_writer(
+        monkeypatch,
+        rows=[
+            ("q0", "d1", 1, 2.0, "ground-truth"),
+            ("q0", "d0", 2, 1.0, "ground-truth"),
+            ("q0", "d2", 3, 0.0, "ground-truth"),
+            ("q1", "d2", 1, 3.0, "ground-truth"),
+            ("q1", "d0", 2, 0.0, "ground-truth"),
+            ("q1", "d1", 3, 0.0, "ground-truth"),
+        ],
+    )
 
     export_embeddings_to_sisap(source_dir, target_dir, "rteb/aila/casedocs")
 
@@ -198,6 +248,16 @@ def test_export_embeddings_to_sisap_writes_expected_bundle(tmp_path):
     with gzip.open(target_dir / "document-id-to-index.json.gz", "rt", encoding="utf-8") as input_file:
         assert json.load(input_file) == {"d0": 0, "d1": 1, "d2": 2}
 
+    with gzip.open(target_dir / "run.txt.gz", "rt", encoding="utf-8") as input_file:
+        assert input_file.read() == (
+            "q0 Q0 d1 1 2.0 ground-truth\n"
+            "q0 Q0 d0 2 1.0 ground-truth\n"
+            "q0 Q0 d2 3 0.0 ground-truth\n"
+            "q1 Q0 d2 1 3.0 ground-truth\n"
+            "q1 Q0 d0 2 0.0 ground-truth\n"
+            "q1 Q0 d1 3 0.0 ground-truth\n"
+        )
+
     with h5py.File(target_dir / "benchmark-dev-rteb-aila-casedocs.h5", "r") as h5_file:
         assert h5_file["train/data"][:].tolist() == [1.0, 2.0, 3.0]
         assert h5_file["train/indices"][:].tolist() == [0, 0, 1]
@@ -207,7 +267,7 @@ def test_export_embeddings_to_sisap_writes_expected_bundle(tmp_path):
         assert h5_file["otest/queries/indices"][:].tolist() == [0, 1]
         assert h5_file["otest/queries/indptr"][:].tolist() == [0, 1, 2]
         assert h5_file["otest/queries"].attrs["shape"].tolist() == [2, 2]
-        assert h5_file["otest"].attrs["algo"] == "exact-scipy-sparse-mm"
+        assert h5_file["otest"].attrs["algo"] == "ground-truth"
         assert h5_file["otest"].attrs["querytime"] == 0.0
         assert h5_file["otest/knns"][:].tolist() == [[2, 1, 3], [3, 1, 2]]
         assert h5_file["otest/dists"][:].tolist() == [[2.0, 1.0, 0.0], [3.0, 0.0, 0.0]]
@@ -229,6 +289,7 @@ def test_download_embeddings_cli_supports_sisap_format(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_download, "Client", FakeClient)
     monkeypatch.setattr(sisap_io_module, "Client", FakeClient)
+    _mock_ground_truth_run_writer(monkeypatch)
 
     runner = CliRunner()
     target_dir = tmp_path / "target"
@@ -322,16 +383,17 @@ def test_tiny_sisap_example_bundle_has_expected_structure():
     _assert_sisap_bundle_structure(TEST_RESOURCES / "example-sisap-task3", expect_mappings=True)
 
 
-def test_exported_sisap_bundle_matches_reference_structure(tmp_path):
+def test_exported_sisap_bundle_matches_reference_structure(tmp_path, monkeypatch):
     source_dir = _write_embedding_dir(tmp_path / "source", doc_count=30)
     target_dir = tmp_path / "target"
+    _mock_ground_truth_run_writer(monkeypatch)
 
     export_embeddings_to_sisap(source_dir, target_dir, "rteb/aila/casedocs")
 
     _assert_sisap_bundle_structure(target_dir, expect_mappings=True)
 
 
-def test_exported_sisap_bundle_matches_example_dataset_ids_and_sizes(tmp_path):
+def test_exported_sisap_bundle_matches_example_dataset_ids_and_sizes(tmp_path, monkeypatch):
     dataset_dir = TEST_RESOURCES / "example-dataset"
     register_to_ir_datasets(str(dataset_dir))
     dataset = load(str(dataset_dir))
@@ -341,6 +403,7 @@ def test_exported_sisap_bundle_matches_example_dataset_ids_and_sizes(tmp_path):
 
     source_dir = _write_embedding_dir_with_ids(tmp_path / "source", doc_ids=doc_ids, query_ids=query_ids)
     target_dir = tmp_path / "target"
+    _mock_ground_truth_run_writer(monkeypatch)
 
     export_embeddings_to_sisap(source_dir, target_dir, str(dataset_dir))
 
@@ -358,6 +421,42 @@ def test_exported_sisap_bundle_matches_example_dataset_ids_and_sizes(tmp_path):
         assert len(h5_file["train/indptr"]) - 1 == len(doc_ids)
         assert h5_file["otest/queries"].attrs["shape"][0] == len(query_ids)
         assert h5_file["train"].attrs["shape"][0] == len(doc_ids)
+
+
+def test_build_ground_truth_from_mock_run_file_variants(tmp_path):
+    run_path = _write_mock_run_file(
+        tmp_path / "run.txt.gz",
+        [
+            ("q1", "d0", 2, 0.25, "mock-software"),
+            ("q0", "d0", 2, 1.0, "mock-software"),
+            ("q0", "d1", 1, 2.0, "mock-software"),
+            ("q1", "d2", 1, 3.0, "mock-software"),
+        ],
+    )
+
+    knns, dists, algo = sisap_io_module._build_ground_truth_from_run_file(
+        run_path,
+        ["q0", "q1"],
+        ["d0", "d1", "d2"],
+        2,
+    )
+
+    assert algo == "mock-software"
+    assert knns.tolist() == [[2, 1], [3, 1]]
+    assert dists.tolist() == [[2.0, 1.0], [3.0, 0.25]]
+
+
+def test_build_ground_truth_from_mock_run_file_rejects_multiple_software_names(tmp_path):
+    run_path = _write_mock_run_file(
+        tmp_path / "run.txt.gz",
+        [
+            ("q0", "d1", 1, 2.0, "first-software"),
+            ("q0", "d0", 2, 1.0, "second-software"),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Expected run.txt.gz to contain exactly one software"):
+        sisap_io_module._build_ground_truth_from_run_file(run_path, ["q0"], ["d0", "d1"], 2)
 
 
 def test_convert_sisap_results_to_trec_run_uses_one_based_id_mappings(tmp_path):
@@ -505,10 +604,11 @@ def test_convert_sisap_truths_to_qrels_normalizes_zero_based_doc_ids(tmp_path):
     ]
 
 
-def test_convert_sisap_truths_to_qrels_preserves_one_based_doc_ids(tmp_path):
+def test_convert_sisap_truths_to_qrels_preserves_one_based_doc_ids(tmp_path, monkeypatch):
     source_dir = _write_embedding_dir(tmp_path / "source", doc_count=30)
     truths_dir = tmp_path / "truths"
     output_path = tmp_path / "qrels.txt"
+    _mock_ground_truth_run_writer(monkeypatch)
 
     export_embeddings_to_sisap(source_dir, truths_dir, "rteb/aila/casedocs")
     convert_sisap_truths_to_qrels(truths_dir, output_path)
@@ -516,15 +616,15 @@ def test_convert_sisap_truths_to_qrels_preserves_one_based_doc_ids(tmp_path):
     lines = output_path.read_text().splitlines()
     assert len(lines) == 60
     assert lines[:4] == [
-        "1 0 2 1",
         "1 0 1 1",
+        "1 0 2 1",
         "1 0 3 1",
         "1 0 4 1",
     ]
     assert lines[30:34] == [
-        "2 0 3 1",
         "2 0 1 1",
         "2 0 2 1",
+        "2 0 3 1",
         "2 0 4 1",
     ]
 

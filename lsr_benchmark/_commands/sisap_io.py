@@ -4,6 +4,7 @@ Attention, this file was created with the help of an coding agent
 import gzip
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import click
@@ -123,27 +124,14 @@ def export_embeddings_to_sisap(
     embedding_tira_id: str | None = None,
 ) -> Path:
     h5py = _import_h5py()
-    target_dir.mkdir(parents=True, exist_ok=False)
 
     doc_data, doc_indices, doc_indptr, doc_ids = _load_embedding_matrix(source_dir, "doc")
     query_data, query_indices, query_indptr, query_ids = _load_embedding_matrix(source_dir, "query")
     feature_count = _feature_count(doc_indices, query_indices)
 
     ground_truth_depth = min(SISAP_GROUND_TRUTH_DEPTH, len(doc_ids))
-    knns = np.empty((len(query_ids), ground_truth_depth), dtype=np.int32)
-    dists = np.empty((len(query_ids), ground_truth_depth), dtype=np.float32)
-
-    postings = _build_postings(doc_data, doc_indices, doc_indptr)
-    for query_idx, (start, end) in enumerate(zip(query_indptr[:-1], query_indptr[1:])):
-        ranked_indices, ranked_scores = _rank_documents_for_query(
-            query_indices[start:end],
-            query_data[start:end],
-            postings,
-            len(doc_ids),
-            ground_truth_depth,
-        )
-        knns[query_idx] = np.asarray(ranked_indices, dtype=np.int32) + 1
-        dists[query_idx] = np.asarray(ranked_scores, dtype=np.float32)
+    run_path = _write_ground_truth_run_file(source_dir, target_dir, dataset)
+    knns, dists, algo = _build_ground_truth_from_run_file(run_path, query_ids, doc_ids, ground_truth_depth)
 
     dataset_name = dataset.replace("/", "-")
     h5_filename = f"benchmark-dev-{dataset_name}.h5"
@@ -156,7 +144,7 @@ def export_embeddings_to_sisap(
         train_group.attrs["shape"] = np.array([len(doc_ids), feature_count], dtype=np.int64)
 
         otest_group = h5_file.create_group("otest")
-        otest_group.attrs["algo"] = "exact-scipy-sparse-mm"
+        otest_group.attrs["algo"] = algo
         otest_group.attrs["querytime"] = np.float64(0.0)
         queries_group = otest_group.create_group("queries")
         queries_group.create_dataset("data", data=query_data, dtype=np.float32)
@@ -190,6 +178,34 @@ def export_embeddings_to_sisap(
     )
 
     return target_dir
+
+
+def _write_ground_truth_run_file(source_dir: Path, target_dir: Path, dataset: str) -> Path:
+    from tira.io_utils import docker_supported_target_platform
+
+    from ._retrieval import run_foo
+    from ._verify_installation import EXAMPLE_RETRIEVAL_ENGINE
+
+    platform = docker_supported_target_platform()
+    if platform not in EXAMPLE_RETRIEVAL_ENGINE:
+        raise ValueError(f"The platform {platform} is not supported for SISAP ground-truth export.")
+
+    retrieval_engine = EXAMPLE_RETRIEVAL_ENGINE[platform]["pyterrier-splade-pisa"]
+    run_foo(
+        retrieval_engine["image"],
+        retrieval_engine["command"] + " --k 100",
+        dataset,
+        source_dir,
+        target_dir / "exact-retrieval-run",
+        platform=platform,
+    )
+
+    ret = target_dir / "exact-retrieval-run" / "run.txt"
+
+    if ret.exists():
+        return ret
+    else:
+        raise ValueError(f"The retrieval command did not produce run.txt")
 
 
 def convert_sisap_results_to_trec_run(
@@ -277,6 +293,78 @@ def convert_sisap_truths_to_qrels(truths_dir: Path, output_path: Path) -> Path:
                 output_file.write(f"{query_idx} 0 {int(doc_id)} 1\n")
 
     return output_path
+
+
+def _build_ground_truth_from_run_file(
+    run_path: Path,
+    query_ids: list[str],
+    doc_ids: list[str],
+    depth: int,
+) -> tuple[np.ndarray, np.ndarray, str]:
+    if depth == 0:
+        return (
+            np.empty((len(query_ids), 0), dtype=np.int32),
+            np.empty((len(query_ids), 0), dtype=np.float32),
+            "",
+        )
+
+    doc_id_to_index = {doc_id: idx + 1 for idx, doc_id in enumerate(doc_ids)}
+    rankings: dict[str, list[tuple[int, int, float]]] = {query_id: [] for query_id in query_ids}
+    seen_ranks: dict[str, set[int]] = {query_id: set() for query_id in query_ids}
+    software_name = None
+
+    with _open_text_for_read(run_path) as input_file:
+        for line_number, line in enumerate(input_file, start=1):
+            stripped_line = line.strip()
+            if not stripped_line:
+                continue
+
+            parts = stripped_line.split()
+            if len(parts) != 6:
+                raise ValueError(
+                    f"Expected {run_path.name} line {line_number} to have 6 whitespace-separated columns, "
+                    f"got {len(parts)}."
+                )
+
+            query_id, _, doc_id, rank_text, score_text, current_software_name = parts
+            if software_name is None:
+                software_name = current_software_name
+            elif current_software_name != software_name:
+                raise ValueError(
+                    f"Expected {run_path.name} to contain exactly one software, got "
+                    f"{software_name!r} and {current_software_name!r}."
+                )
+
+            if query_id not in rankings:
+                raise ValueError(f"Unexpected query ID {query_id!r} in {run_path.name}.")
+            if doc_id not in doc_id_to_index:
+                raise ValueError(f"Unexpected document ID {doc_id!r} in {run_path.name}.")
+
+            rank = int(rank_text)
+            if rank <= 0:
+                raise ValueError(f"Expected positive ranks in {run_path.name}, got {rank} on line {line_number}.")
+            if rank in seen_ranks[query_id]:
+                raise ValueError(f"Duplicate rank {rank} for query {query_id!r} in {run_path.name}.")
+            seen_ranks[query_id].add(rank)
+
+            rankings[query_id].append((rank, doc_id_to_index[doc_id], float(score_text)))
+
+    if software_name is None:
+        raise ValueError(f"Expected at least one run entry in {run_path.name}.")
+
+    knns = np.empty((len(query_ids), depth), dtype=np.int32)
+    dists = np.empty((len(query_ids), depth), dtype=np.float32)
+    for query_idx, query_id in enumerate(query_ids):
+        ranked_docs = sorted(rankings[query_id], key=lambda item: item[0])
+        if len(ranked_docs) < depth:
+            raise ValueError(
+                f"Expected at least {depth} run entries for query {query_id!r} in {run_path.name}, "
+                f"got {len(ranked_docs)}."
+            )
+        knns[query_idx] = np.asarray([doc_idx for _, doc_idx, _ in ranked_docs[:depth]], dtype=np.int32)
+        dists[query_idx] = np.asarray([score for _, _, score in ranked_docs[:depth]], dtype=np.float32)
+
+    return knns, dists, software_name
 
 
 def _load_embedding_matrix(embedding_dir: Path, prefix: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
@@ -406,6 +494,12 @@ def _open_text_for_write(path: Path):
     if path.suffix == ".gz":
         return gzip.open(path, "wt", encoding="utf-8")
     return path.open("w", encoding="utf-8")
+
+
+def _open_text_for_read(path: Path):
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8")
+    return path.open("r", encoding="utf-8")
 
 
 def _normalize_truth_doc_ids(gt_I: np.ndarray) -> np.ndarray:
