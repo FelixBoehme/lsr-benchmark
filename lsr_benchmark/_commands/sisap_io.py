@@ -4,7 +4,6 @@ Attention, this file was created with the help of an coding agent
 import gzip
 import json
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import numpy as np
 import click
@@ -205,7 +204,7 @@ def _write_ground_truth_run_file(source_dir: Path, target_dir: Path, dataset: st
     if ret.exists():
         return ret
     else:
-        raise ValueError(f"The retrieval command did not produce run.txt")
+        raise ValueError("The retrieval command did not produce run.txt")
 
 
 def convert_sisap_results_to_trec_run(
