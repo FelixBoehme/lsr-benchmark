@@ -46,6 +46,16 @@ pip3 install git+https://github.com/reneuir/lsr-benchmark.git
 
 Please run `lsr-benchmark overview` for an up-to-date overview over all datasets and all embeddings. Alternatively, [online overview in TIRA](https://archive.tira.io/task-overview/lsr-benchmark/) provides an overview.
 
+# Retrieval Suites
+
+Predefined suites select the datasets, embeddings, and retrieval engines for a benchmark run:
+
+```shell
+lsr-benchmark retrieval --suite reneuir-2026/full --out my-reneuir-2026-results
+```
+
+Suites are maintained in [`lsr_benchmark/retrieval_suites.py`](lsr_benchmark/retrieval_suites.py). A suite cannot be combined with positional retrieval engines, `--dataset`, or `--embedding`.
+
 # Running Tests
 
 We have a suite of unit tests that you can run via:

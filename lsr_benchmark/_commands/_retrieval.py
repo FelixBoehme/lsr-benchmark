@@ -2,14 +2,21 @@ import contextlib
 import click
 import io
 import sys
+from typing import Optional
 from tira.io_utils import log_message, verify_docker_installation, FormatMsgType
 from tira.third_party_integrations import temporary_directory
 from tira.check_format import check_format
 from tira.rest_api_client import Client
 from pathlib import Path
-from lsr_benchmark.datasets import all_embeddings, all_dense_embeddings, all_datasets
+from lsr_benchmark.datasets import (
+    IR_DATASET_TO_TIRA_DATASET,
+    all_datasets,
+    all_dense_embeddings,
+    all_embeddings,
+)
 from lsr_benchmark._commands._verify_installation import EXAMPLE_RETRIEVAL_ENGINE
 from lsr_benchmark._commands._modify_data import JOINT_TO_DATASETS
+from lsr_benchmark.retrieval_suites import RETRIEVAL_SUITES
 import shutil
 import yaml
 from tira.io_utils import docker_supported_target_platform
@@ -122,10 +129,56 @@ class ChoiceOrPath(click.ParamType):
             ctx
         )
 
+
+def resolve_retrieval_configuration(suite, approaches, datasets, embeddings):
+    if suite is None:
+        return approaches, datasets, embeddings
+
+    if approaches or datasets or embeddings:
+        raise click.UsageError(
+            "--suite cannot be combined with retrieval engines, --dataset, or --embedding."
+        )
+
+    configuration = RETRIEVAL_SUITES[suite]
+    suite_datasets = []
+    for dataset in configuration["datasets"]:
+        if dataset == "all" or dataset in all_datasets():
+            suite_datasets.append(dataset)
+        elif dataset in IR_DATASET_TO_TIRA_DATASET:
+            suite_datasets.append(IR_DATASET_TO_TIRA_DATASET[dataset])
+        else:
+            raise click.UsageError(
+                f"Suite {suite!r} contains unsupported dataset {dataset!r}."
+            )
+
+    supported_embeddings = {"all", "none", *all_embeddings(), *all_dense_embeddings()}
+    unsupported_embeddings = [
+        embedding
+        for embedding in configuration["embeddings"]
+        if embedding not in supported_embeddings
+    ]
+    if unsupported_embeddings:
+        raise click.UsageError(
+            f"Suite {suite!r} contains unsupported embedding "
+            f"{unsupported_embeddings[0]!r}."
+        )
+
+    return (
+        tuple(configuration["retrieval_engines"]),
+        tuple(suite_datasets),
+        tuple(configuration["embeddings"]),
+    )
+
+
 @click.argument(
     "approaches",
     type=str,
     nargs=-1,
+)
+@click.option(
+    "--suite",
+    type=click.Choice(sorted(RETRIEVAL_SUITES)),
+    help="A predefined retrieval suite.",
 )
 @click.option(
     "-o", "--out",
@@ -146,7 +199,13 @@ class ChoiceOrPath(click.ParamType):
     multiple=True,
     help="The datasets to run on.",
 )
-def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], out: str) -> int:
+def retrieval(
+    approaches: list[str],
+    suite: Optional[str],
+    dataset: list[str],
+    embedding: list[str],
+    out: str,
+) -> int:
     all_messages = []
 
     def print_message(message, level):
@@ -155,6 +214,10 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
         print(' '.join([sys.argv[0].split('/')[-1]] + sys.argv[1:]))
         for message, level in all_messages:
             log_message(message, level)
+
+    approaches, dataset, embedding = resolve_retrieval_configuration(
+        suite, approaches, dataset, embedding
+    )
 
     for d in dataset:
         for e in embedding:
@@ -199,6 +262,7 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
         return 1
 
     stats = {}
+    failures = 0
     for d in dataset:
         for e in embedding:
             for approach in approaches:
@@ -215,10 +279,21 @@ def retrieval(approaches: list[str], dataset: list[str], embedding: list[str], o
                         stats[approach] = {"embeddings": set(), "datasets": set()}
                     stats[approach]["embeddings"].add(emb)
                     stats[approach]["datasets"].add(dset)
-                except Exception:  # noqa: S112
+                except Exception as error:
+                    failures += 1
+                    print_message(
+                        f"Approach {approach} failed on dataset {dset} with "
+                        f"embedding {emb}: {error}",
+                        FormatMsgType.ERROR,
+                    )
                     continue
 
     for approach in stats:
         print_message(f"Approach {approach} produced valid outputs on {len(stats[approach]['datasets'])} datasets for {len(stats[approach]['embeddings'])} embeddings.", FormatMsgType.OK)
+
+    if failures:
+        raise click.ClickException(
+            f"{failures} retrieval configuration(s) failed."
+        )
 
     return 0
