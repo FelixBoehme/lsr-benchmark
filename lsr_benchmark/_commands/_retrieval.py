@@ -23,7 +23,16 @@ from tira.io_utils import docker_supported_target_platform
 import os
 
 
-def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platform=None):
+def run_retrieval_engine(
+    docker_image,
+    command,
+    dataset_id,
+    embedding,
+    output_dir=None,
+    platform=None,
+    cpus=None,
+    memory=None,
+):
     if output_dir is not None and Path(output_dir).exists():
         return
     tira = Client()
@@ -56,6 +65,8 @@ def run_foo(docker_image, command, dataset_id, embedding, output_dir=None, platf
         input_run=embeddings_dir,
         mount_directory=mount_directory,
         platform=platform if platform else docker_supported_target_platform(),
+        cpu_count=cpus,
+        mem_limit=memory,
     )
 
     result, msg = check_format(Path(tmp_dir), ["run.txt"], {})
@@ -199,11 +210,25 @@ def resolve_retrieval_configuration(suite, approaches, datasets, embeddings):
     multiple=True,
     help="The datasets to run on.",
 )
+@click.option(
+    "--cpus",
+    type=click.IntRange(min=1),
+    metavar="CPUS",
+    help="The number of CPUs used for execution.",
+)
+@click.option(
+    "--memory",
+    type=str,
+    metavar="MEMORY",
+    help="The memory limit.",
+)
 def retrieval(
     approaches: list[str],
     suite: Optional[str],
     dataset: list[str],
     embedding: list[str],
+    cpus: Optional[int],
+    memory: Optional[str],
     out: str,
 ) -> int:
     all_messages = []
@@ -274,7 +299,16 @@ def retrieval(
                     emb = e.stem
                 out_dir = Path(out) / (dset + quant_suffix) / emb / approach
                 try:
-                    run_foo(approach_to_execution[approach]["tag"], approach_to_execution[approach]["command"], d, e, out_dir, platform=platform)
+                    run_retrieval_engine(
+                        approach_to_execution[approach]["tag"],
+                        approach_to_execution[approach]["command"],
+                        d,
+                        e,
+                        out_dir,
+                        platform=platform,
+                        cpus=cpus,
+                        memory=memory,
+                    )
                     if approach not in stats:
                         stats[approach] = {"embeddings": set(), "datasets": set()}
                     stats[approach]["embeddings"].add(emb)

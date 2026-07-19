@@ -182,7 +182,7 @@ def export_embeddings_to_sisap(
 def _write_ground_truth_run_file(source_dir: Path, target_dir: Path, dataset: str) -> Path:
     from tira.io_utils import docker_supported_target_platform
 
-    from ._retrieval import run_foo
+    from ._retrieval import run_retrieval_engine
     from ._verify_installation import EXAMPLE_RETRIEVAL_ENGINE
 
     platform = docker_supported_target_platform()
@@ -190,7 +190,7 @@ def _write_ground_truth_run_file(source_dir: Path, target_dir: Path, dataset: st
         raise ValueError(f"The platform {platform} is not supported for SISAP ground-truth export.")
 
     retrieval_engine = EXAMPLE_RETRIEVAL_ENGINE[platform]["pyterrier-splade-pisa"]
-    run_foo(
+    run_retrieval_engine(
         retrieval_engine["image"],
         retrieval_engine["command"] + " --k 100",
         dataset,

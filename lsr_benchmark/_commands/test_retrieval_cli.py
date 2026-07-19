@@ -103,9 +103,9 @@ def test_retrieval_accepts_suite(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         retrieval_module,
-        "run_foo",
-        lambda image, command, dataset, embedding, output_dir, platform: calls.append(
-            (image, dataset, embedding, output_dir, platform)
+        "run_retrieval_engine",
+        lambda image, command, dataset, embedding, output_dir, **kwargs: calls.append(
+            (image, dataset, embedding, output_dir, kwargs)
         ),
     )
     monkeypatch.setattr(retrieval_module.os, "system", lambda command: 0)
@@ -118,6 +118,10 @@ def test_retrieval_accepts_suite(monkeypatch, tmp_path):
             "reneuir-2026/small",
             "--out",
             str(tmp_path),
+            "--cpus",
+            "4",
+            "--memory",
+            "16g",
         ],
     )
 
@@ -130,6 +134,55 @@ def test_retrieval_accepts_suite(monkeypatch, tmp_path):
     assert {call[1] for call in calls} == {
         "trec-28-deep-learning-passages-20250926-training"
     }
+    assert {call[4]["cpus"] for call in calls} == {4}
+    assert {call[4]["memory"] for call in calls} == {"16g"}
+    assert {call[4]["platform"] for call in calls} == {"linux/amd64"}
+
+
+def test_run_retrieval_engine_forwards_resources_to_tira(monkeypatch, tmp_path):
+    retrieval_module = __import__(
+        "lsr_benchmark._commands._retrieval", fromlist=["_retrieval"]
+    )
+    dataset_dir = tmp_path / "dataset"
+    embedding_dir = tmp_path / "embeddings"
+    execution_dir = tmp_path / "execution"
+    dataset_dir.mkdir()
+    embedding_dir.mkdir()
+    execution_dir.mkdir()
+    (execution_dir / "retrieval-metadata.yml").write_text("tag: test\n")
+    execution_arguments = {}
+
+    class LocalExecution:
+        def run(self, **kwargs):
+            execution_arguments.update(kwargs)
+
+    class TiraClient:
+        local_execution = LocalExecution()
+
+    monkeypatch.setattr(retrieval_module, "Client", TiraClient)
+    monkeypatch.setattr(
+        retrieval_module, "temporary_directory", lambda: execution_dir
+    )
+    monkeypatch.setattr(
+        retrieval_module,
+        "check_format",
+        lambda directory, expected_files, context: (
+            retrieval_module.FormatMsgType.OK,
+            "",
+        ),
+    )
+
+    retrieval_module.run_retrieval_engine(
+        "image",
+        "command",
+        dataset_dir,
+        embedding_dir,
+        cpus=8,
+        memory="32g",
+    )
+
+    assert execution_arguments["cpu_count"] == 8
+    assert execution_arguments["mem_limit"] == "32g"
 
 
 def test_retrieval_reports_execution_failures(monkeypatch, tmp_path):
@@ -154,7 +207,7 @@ def test_retrieval_reports_execution_failures(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         retrieval_module,
-        "run_foo",
+        "run_retrieval_engine",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             ValueError("dataset lookup failed")
         ),
