@@ -68,7 +68,11 @@ def __read_metrics(name: str) -> "tuple[dict[str, Metadata], list[ScoredDoc]]":
 
     if Path(name).is_dir():
         for line in lines_if_valid(Path(name), "ir_metadata"):
-            metadata[line['name'].replace('.', '').split("-")[0]] = line['content']
+            split_key = line['name'].replace('.', '').split("-")
+            key = split_key[0]
+            if split_key[1] == "doc" or split_key[1] == "query":
+                key += f"-{split_key[1]}"
+            metadata[key] = line['content']
         if (Path(name) / "run.txt").is_file():
             run = list(ir_measures.read_trec_run((Path(name) / "run.txt").read_text()))
         else:
@@ -83,7 +87,7 @@ def __read_metrics(name: str) -> "tuple[dict[str, Metadata], list[ScoredDoc]]":
                 with GzipFile(fileobj=compressed, mode="r") as binary:
                     with TextIOWrapper(binary, encoding="utf-8") as file:
                         run = list(ir_measures.read_trec_run(file))
-    
+
     if len(metadata) == 0:
         raise ValueError("I could not read any metadata")
     if len(run) == 0:
@@ -177,7 +181,7 @@ def __get_embedding_name(p: Path, metadata):
     # FIXME read this from metadata
     ret = []
 
-    
+
     for k, m in metadata.items():
         if "data" in m and "embedding model" in m["data"]:
             return m["data"]["embedding model"]["name"]

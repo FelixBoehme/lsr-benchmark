@@ -97,8 +97,8 @@ def run_retrieval_engine(
             for meta_file in ["index-metadata.yml", "retrieval-metadata.yml"]:
                 with open(output_dir/meta_file, "r") as f:
                     meta = yaml.safe_load(f)
-                meta["data"]["test collection"]["union of subsamples"] = JOINT_TO_DATASETS[dataset_id]
-                with open(output_dir/meta_file, "w") as f:
+                meta["data"]["test collection"]["union of subsamples"] = JOINT_TO_DATASETS[dataset_id]["datasets"]
+                with open(output_dir / meta_file, "w") as f:
                     yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
 
     return tag

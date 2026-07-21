@@ -9,10 +9,11 @@ from ir_datasets.datasets.base import Dataset
 from ir_datasets.formats import BaseDocs, BaseQueries, GenericQuery, TrecQrels
 from ir_datasets.util import MetadataComponent
 from tira.check_format import JsonlFormat, QueryProcessorFormat
-from tira.third_party_integrations import in_tira_sandbox
+from tira.third_party_integrations import in_tira_sandbox, default_tira_cache_dir
 from tqdm import tqdm
 
 from lsr_benchmark.datasets import TIRA_DATASET_ID_TO_IR_DATASET_ID
+from lsr_benchmark._commands._modify_data import JOINT_TO_DATASETS, DuplicateBehaviour
 
 
 TIRA_LSR_TASK_ID = "lsr-benchmark"
@@ -67,10 +68,10 @@ def embeddings(
 
 def ir_datasets_from_tira(force_reload=False):
     global _IR_DATASETS_FROM_TIRA
-    
+
     if in_tira_sandbox():
         return []
-    
+
     if _IR_DATASETS_FROM_TIRA is None or force_reload:
         from tira.rest_api_client import Client
         tira = Client()
@@ -85,6 +86,41 @@ def _dowload_from_tira(ir_datasets_id, truth_dataset):
 
     from tira.rest_api_client import Client
     tira = Client()
+
+    if ir_datasets_id in JOINT_TO_DATASETS and truth_dataset:
+        ds = JOINT_TO_DATASETS[ir_datasets_id]
+        doc_settings = ds["settings"].doc
+        query_settings = ds["settings"].query
+        datasets = ds["datasets"]
+        paths = [tira.download_dataset(task=None, dataset=ds_id, truth_dataset=truth_dataset) for ds_id in datasets]
+        out_path = Path(f"{default_tira_cache_dir()}/extracted_datasets/None/{ir_datasets_id}/truth_data")
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        seen = set()
+
+        with open(out_path / "qrels.txt", "w") as out:
+            for ds_id, p in zip(datasets, paths):
+                with open(p / "qrels.txt", "r") as f:
+                    for line in f:
+                        query_id, iteration, doc_id, relevance = line.split()
+
+                        if query_settings == DuplicateBehaviour.PREFIX:
+                            query_id = f"{ds_id}_{query_id}"
+                        if doc_settings == DuplicateBehaviour.PREFIX:
+                            doc_id = f"{ds_id}_{doc_id}"
+
+                        key = (query_id, doc_id)
+                        if key in seen:
+                            if DuplicateBehaviour.FAIL in (query_settings, doc_settings):
+                                raise ValueError(
+                                    f"Duplicate qrel entry across joined datasets: query={query_id}, doc={doc_id}"
+                                )
+                            continue
+
+                        seen.add(key)
+                        out.write(f"{query_id} {iteration} {doc_id} {relevance}\n")
+
+        return out_path
 
     if '-train' not in ir_datasets_id and not in_tira_sandbox() and not tira.api_key_is_valid():
         raise ValueError(f"The dataset {ir_datasets_id} is private, you can not access the raw data.")
@@ -185,7 +221,7 @@ class LsrBenchmarkDataset(Dataset):
 
         if in_tira_sandbox():
             qrels_obj = None
-        
+
         else:
             class QrelsObj:
                 def stream(self):
@@ -195,7 +231,7 @@ class LsrBenchmarkDataset(Dataset):
             class TmpTrecQrels(TrecQrels):
                 def qrels_iter(self):
                     try:
-                        _dowload_from_tira(ir_datasets_id, True)    
+                        _dowload_from_tira(ir_datasets_id, True)
                     except Exception:
                         # Dataser could no be found on TIRA, fallback to ir_datasets
                         import ir_datasets
