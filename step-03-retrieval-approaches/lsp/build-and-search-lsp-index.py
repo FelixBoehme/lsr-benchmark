@@ -45,20 +45,16 @@ def main(dataset, embedding, output, k, beta, gamma, mu, eta, bsize, quant, comp
     # LSP quantizes document term weights to 8-bit impacts relative to the global maximum.
     max_value = max((max(values) for _, _, values in doc_embeddings if values), default=1.0)
 
-    # Reorder documents with GuideKP before indexing. The LSP index lays documents out in
-    # blocks in insertion order, so permuting the list here is the document reordering.
-    # GuideKP normally operates on CIFF; reorder_documents builds its forward index directly
-    # from these sparse vectors and returns the new order (order[new_pos] = original index).
-    # It is given the same max_value as the index so its weight->tf quantization matches.
-    order = reorder_documents(
-        [doc_id for doc_id, _, _ in doc_embeddings],
-        [tokens for _, tokens, _ in doc_embeddings],
-        [values for _, _, values in doc_embeddings],
-        max_value=max_value,
-    )
-    doc_embeddings = [doc_embeddings[i] for i in order]
-
     with tracking(export_file_path=output / "index-metadata.yml", export_format=ExportFormat.IR_METADATA):
+        # Reorder documents with GuideKP before indexing.
+        order = reorder_documents(
+            [doc_id for doc_id, _, _ in doc_embeddings],
+            [tokens for _, tokens, _ in doc_embeddings],
+            [values for _, _, values in doc_embeddings],
+            max_value=max_value,
+        )
+        doc_embeddings = [doc_embeddings[i] for i in order]
+
         indexer = Indexer(bsize=block_sizes, max_value=max_value, quant=quant, compress_range=compression, compress_doc=compress_doc)
         for doc_id, tokens, values in tqdm(doc_embeddings, "create lsp index"):
             indexer.add_document(doc_id, tokens, values)
