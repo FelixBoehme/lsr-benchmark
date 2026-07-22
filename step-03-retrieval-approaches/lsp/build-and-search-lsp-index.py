@@ -5,6 +5,7 @@ from shutil import rmtree
 import click
 import ir_datasets
 import lsr_benchmark
+from guidekp import reorder_documents
 from lsp import Indexer
 from lsr_benchmark.click import retrieve_command
 from tirex_tracker import ExportFormat, register_metadata, tracking
@@ -31,7 +32,7 @@ def main(dataset, embedding, output, k, beta, gamma, mu, eta, bsize, quant, comp
     block_sizes = [int(b) for b in bsize.split(",")]
 
     # the index layout is part of the tag: the variants rank identically but are
-    # exactly what this task measures the efficiency of
+    # exactly what this task measures the efficiency of. the document ordering
     register_metadata({"actor": {"team": "reneuir-baselines"}, "tag": f"lsp-{embedding.replace('/', '-')}-{compression}-{compress_doc}-{quant}-{beta}-{gamma}-{mu}-{k}"})
 
     # the values in the npz files are not guaranteed to be numeric (e.g., the query
@@ -40,8 +41,22 @@ def main(dataset, embedding, output, k, beta, gamma, mu, eta, bsize, quant, comp
         (doc_id, tokens.tolist(), values.astype("float32").tolist())
         for doc_id, tokens, values in ir_dataset.doc_embeddings(model_name=embedding)
     ]
+
     # LSP quantizes document term weights to 8-bit impacts relative to the global maximum.
     max_value = max((max(values) for _, _, values in doc_embeddings if values), default=1.0)
+
+    # Reorder documents with GuideKP before indexing. The LSP index lays documents out in
+    # blocks in insertion order, so permuting the list here is the document reordering.
+    # GuideKP normally operates on CIFF; reorder_documents builds its forward index directly
+    # from these sparse vectors and returns the new order (order[new_pos] = original index).
+    # It is given the same max_value as the index so its weight->tf quantization matches.
+    order = reorder_documents(
+        [doc_id for doc_id, _, _ in doc_embeddings],
+        [tokens for _, tokens, _ in doc_embeddings],
+        [values for _, _, values in doc_embeddings],
+        max_value=max_value,
+    )
+    doc_embeddings = [doc_embeddings[i] for i in order]
 
     with tracking(export_file_path=output / "index-metadata.yml", export_format=ExportFormat.IR_METADATA):
         indexer = Indexer(bsize=block_sizes, max_value=max_value, quant=quant, compress_range=compression, compress_doc=compress_doc)

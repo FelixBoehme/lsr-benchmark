@@ -8,6 +8,9 @@ and queries are processed by pruning (super)blocks whose upper-bound score canno
 The entrypoint indexes the document embeddings in memory and answers all queries in a single batched
 call into the Rust engine. Currently only `linux/amd64` is supported 
 
+Before indexing, documents are reordered with [GuideKP](https://github.com/pisa-engine/guidekp)
+(kmeans-guided recursive graph bisection), which is required for high quality retrieval results.
+
 Tunable knobs (defaults are rank-safe): 
 `--gamma` (guaranteed number of superblocks), 
 `--mu` (threshold overestimation),
