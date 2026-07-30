@@ -277,9 +277,16 @@ def build_retrieval_jobs(
     for dataset in datasets:
         dataset_name = dataset.stem if isinstance(dataset, Path) else dataset
         for embedding in embeddings:
-            embedding_name = (
-                embedding.stem if isinstance(embedding, Path) else embedding
-            )
+            embedding_name = embedding
+            quant_suffix = ""
+            if isinstance(embedding, Path):
+                embedding_name = embedding.stem
+                meta_path = embedding / "doc" / f"{'d0-' if dataset_name in JOINT_TO_DATASETS else ''}doc-ir-metadata.yml"
+                with open(meta_path) as f:
+                    meta = yaml.safe_load(f)
+                test_collection = meta["data"]["test collection"]
+                if "quantization" in test_collection:
+                    quant_suffix = f"-{test_collection['quantization']}"
             for approach in approaches:
                 execution = approach_to_execution[approach]
                 jobs.append(
@@ -293,7 +300,7 @@ def build_retrieval_jobs(
                         command=execution["command"],
                         output_dir=(
                             output_root
-                            / dataset_name
+                            / (dataset_name + quant_suffix)
                             / embedding_name
                             / approach
                         ),
