@@ -382,7 +382,7 @@ def report_retrieval_stats(stats, print_message):
 )
 @click.option(
     "--dataset",
-    type=ChoiceOrPath(["all"] + all_datasets()),
+    type=ChoiceOrPath(["all"] + all_datasets() + list(JOINT_TO_DATASETS.keys())),
     multiple=True,
     help="The datasets to run on.",
 )
