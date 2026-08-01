@@ -291,7 +291,7 @@ def test_execute_retrieval_jobs_skips_or_reruns_failed_output(
     assert not output_dir.exists()
 
 
-def test_run_retrieval_engine_moves_invalid_output_to_failed(
+def test_run_retrieval_engine_copies_invalid_output_to_failed(
     monkeypatch, tmp_path
 ):
     retrieval_module = __import__(

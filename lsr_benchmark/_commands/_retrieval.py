@@ -82,7 +82,7 @@ def run_retrieval_engine(
         if output_dir is not None:
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True)
-            shutil.move(execution_dir, output_dir / ".failed")
+            shutil.copytree(execution_dir, output_dir / ".failed")
         print(msg)
         raise ValueError(msg)
 
