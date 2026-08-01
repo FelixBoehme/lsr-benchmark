@@ -44,6 +44,17 @@ def test_ioqp_indexes_and_searches_small_corpus(tmp_path):
     assert results[0][1][0][1] > results[0][1][1][1]
 
 
+def test_ioqp_indexes_posting_list_with_full_block_and_tail(tmp_path):
+    documents = [(f"d{i}", ["0"], [1.0]) for i in range(129)]
+    ciff_path = tmp_path / "index.ciff"
+    index_path = tmp_path / "index.ioqp"
+
+    ioqp_retrieval.write_ciff(ciff_path, documents, max_document_impact=100)
+    ioqp_retrieval.create_ioqp_index(ciff_path, index_path)
+
+    assert index_path.is_file()
+
+
 def test_main_writes_compressed_trec_run(monkeypatch, tmp_path):
     embeddings = {
         "doc": [

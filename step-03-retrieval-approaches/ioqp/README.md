@@ -54,6 +54,11 @@ documents. [`ioqp-small-corpora.patch`](ioqp-small-corpora.patch) bounds that
 block by the corpus size so unit tests and the benchmark's tiny example can be
 processed.
 
+The upstream Stream VByte dependency otherwise compiles with `-march=native`,
+which can produce illegal-instruction failures when an image runs on a
+different CPU. [`portable-build.cmake`](portable-build.cmake) disables that
+build-host-specific optimization.
+
 ## Usage
 
 ```bash
