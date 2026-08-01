@@ -4,7 +4,12 @@ from dataclasses import dataclass
 import io
 import sys
 from typing import Mapping, Optional, Union
-from tira.io_utils import log_message, verify_docker_installation, FormatMsgType
+from tira.io_utils import (
+    FormatMsgType,
+    MonitoredExecution,
+    log_message,
+    verify_docker_installation,
+)
 from tira.third_party_integrations import temporary_directory
 from tira.check_format import check_format
 from tira.rest_api_client import Client
@@ -56,22 +61,28 @@ def run_retrieval_engine(
     mount_directory = None
     if embeddings_dir:
         mount_directory = {"embeddings": embeddings_dir}
-    tmp_dir = temporary_directory()
-    tira.local_execution.run(
-        image=docker_image,
-        command=command,
-        input_dir=dataset_path,
-        output_dir=tmp_dir,
-        allow_network=False,
-        input_run=embeddings_dir,
-        mount_directory=mount_directory,
-        platform=platform if platform else docker_supported_target_platform(),
-        cpu_count=cpus,
-        mem_limit=memory,
+    execution_dir = MonitoredExecution().run(
+        lambda tmp_dir: tira.local_execution.run(
+            image=docker_image,
+            command=command,
+            input_dir=dataset_path,
+            output_dir=tmp_dir,
+            allow_network=False,
+            input_run=embeddings_dir,
+            mount_directory=mount_directory,
+            platform=platform if platform else docker_supported_target_platform(),
+            cpu_count=cpus,
+            mem_limit=memory,
+        )
     )
+    tmp_dir = execution_dir / "output"
 
-    result, msg = check_format(Path(tmp_dir), ["run.txt"], {})
+    result, msg = check_format(tmp_dir, ["run.txt"], {})
     if result != FormatMsgType.OK:
+        if output_dir is not None:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True)
+            shutil.move(execution_dir, output_dir / ".failed")
         print(msg)
         raise ValueError(msg)
 
@@ -291,11 +302,24 @@ def build_retrieval_jobs(
     return tuple(jobs)
 
 
-def execute_retrieval_jobs(jobs, platform, cpus, memory, print_message):
+def execute_retrieval_jobs(
+    jobs, platform, cpus, memory, print_message, rerun_failed=False
+):
     """Execute jobs independently and aggregate successful inputs and failures."""
     stats = {}
     failures = 0
     for job in jobs:
+        if (job.output_dir / ".failed").is_dir():
+            if rerun_failed:
+                shutil.rmtree(job.output_dir)
+            else:
+                failures += 1
+                print_message(
+                    f"Approach {job.approach} previously failed on dataset "
+                    f"{job.dataset_name} with embedding {job.embedding_name}.",
+                    FormatMsgType.ERROR,
+                )
+                continue
         try:
             run_retrieval_engine(
                 job.image,
@@ -373,6 +397,7 @@ def report_retrieval_stats(stats, print_message):
     metavar="MEMORY",
     help="The memory limit.",
 )
+@click.option("--rerun-failed", is_flag=True, help="Re-run failed executions.")
 def retrieval(
     approaches: list[str],
     suite: Optional[str],
@@ -380,6 +405,7 @@ def retrieval(
     embedding: list[str],
     cpus: Optional[int],
     memory: Optional[str],
+    rerun_failed: bool,
     out: str,
 ) -> int:
     all_messages = []
@@ -411,7 +437,7 @@ def retrieval(
         approaches, dataset, embedding, approach_to_execution, Path(out)
     )
     stats, failures = execute_retrieval_jobs(
-        jobs, platform, cpus, memory, print_message
+        jobs, platform, cpus, memory, print_message, rerun_failed
     )
     report_retrieval_stats(stats, print_message)
 

@@ -1,0 +1,55 @@
+diff --git a/src/search.rs b/src/search.rs
+index 24b26b0..fb244ef 100644
+--- a/src/search.rs
++++ b/src/search.rs
+@@ -92,7 +92,7 @@ pub fn b_search_verbose(
+         query_vec.sort_by_key(|e| e.0);
+         let threshold = query
+             .iter()
+-            .map(|&pl| pl.kth(k) as u16 * pl.term_weight() as u16)
++            .map(|&pl| (pl.kth(k) as u16 * pl.term_weight() as u16).saturating_sub(1))
+             .max()
+             .unwrap_or(0);
+ 
+@@ -122,32 +122,25 @@ pub fn b_search_verbose(
+-        let mut ub_iter =
+-            buckets
+-                .iter_mut()
+-                .enumerate()
+-                .rev()
+-                .flat_map(|(outer_idx, inner_vec)| {
+-                    inner_vec.iter_mut().map(move |val| (outer_idx, val))
+-                });
+-
+-        let (mut current_ub, mut current_block) = ub_iter.next().unwrap();
+-        prefetch_block(forward_index, *current_block);
+-
+-        for (next_ub, next_block) in ub_iter {
+-            prefetch_block(forward_index, *next_block);
++        for (current_ub, current_block) in buckets
++            .iter_mut()
++            .enumerate()
++            .rev()
++            .flat_map(|(outer_idx, inner_vec)| {
++                inner_vec.iter_mut().map(move |val| (outer_idx, val))
++            })
++        {
++            prefetch_block(forward_index, *current_block);
+             let offset = *current_block as usize * forward_index.block_size;
+ 
+             let res = block_score(
+                 &query_vec,
+                 &forward_index.data[*current_block as usize],
+                 forward_index.block_size,
+             );
+ 
+             for (doc_id, &score) in res.iter().enumerate() {
+                 topk.insert(DocId(doc_id as u32 + offset as u32), score);
+             }
+ 
+             if topk.threshold() as f32 > current_ub as f32 * alpha {
+                 break;
+             }
+-            current_block = next_block;
+-            current_ub = next_ub;
+         }

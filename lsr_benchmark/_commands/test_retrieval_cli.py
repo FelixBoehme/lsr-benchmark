@@ -1,4 +1,5 @@
 import click
+from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
@@ -148,12 +149,13 @@ def test_run_retrieval_engine_forwards_resources_to_tira(monkeypatch, tmp_path):
     execution_dir = tmp_path / "execution"
     dataset_dir.mkdir()
     embedding_dir.mkdir()
-    execution_dir.mkdir()
-    (execution_dir / "retrieval-metadata.yml").write_text("tag: test\n")
     execution_arguments = {}
 
     class LocalExecution:
-        def run(self, **kwargs):
+        def run(self, output_dir, **kwargs):
+            output_dir = Path(output_dir)
+            (output_dir / "retrieval-metadata.yml").write_text("tag: test\n")
+            kwargs["output_dir"] = output_dir
             execution_arguments.update(kwargs)
 
     class TiraClient:
@@ -161,7 +163,14 @@ def test_run_retrieval_engine_forwards_resources_to_tira(monkeypatch, tmp_path):
 
     monkeypatch.setattr(retrieval_module, "Client", TiraClient)
     monkeypatch.setattr(
-        retrieval_module, "temporary_directory", lambda: execution_dir
+        retrieval_module.MonitoredExecution,
+        "run",
+        lambda self, method: (
+            execution_dir.mkdir(),
+            (execution_dir / "output").mkdir(),
+            method(execution_dir / "output"),
+            execution_dir,
+        )[-1],
     )
     monkeypatch.setattr(
         retrieval_module,

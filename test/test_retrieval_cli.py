@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 import pytest
 from click.testing import CliRunner
@@ -257,6 +258,86 @@ def test_execute_retrieval_jobs_aggregates_success_and_failure(
     assert "Approach kannolo failed" in messages[0][0]
 
 
+def test_execute_retrieval_jobs_skips_or_reruns_failed_output(
+    monkeypatch, tmp_path
+):
+    retrieval_module = __import__(
+        "lsr_benchmark._commands._retrieval", fromlist=["_retrieval"]
+    )
+    output_dir = tmp_path / "seismic"
+    (output_dir / ".failed").mkdir(parents=True)
+    job = RetrievalJob(
+        "seismic", DATASET, EMBEDDING, DATASET, EMBEDDING,
+        "image/seismic", "/run-seismic", output_dir,
+    )
+    calls = []
+    monkeypatch.setattr(
+        retrieval_module,
+        "run_retrieval_engine",
+        lambda *args, **kwargs: calls.append(args),
+    )
+
+    _, failures = execute_retrieval_jobs(
+        (job,), "linux/amd64", None, None, lambda *args: None
+    )
+    assert failures == 1
+    assert calls == []
+
+    _, failures = execute_retrieval_jobs(
+        (job,), "linux/amd64", None, None, lambda *args: None, rerun_failed=True
+    )
+    assert failures == 0
+    assert len(calls) == 1
+    assert not output_dir.exists()
+
+
+def test_run_retrieval_engine_moves_invalid_output_to_failed(
+    monkeypatch, tmp_path
+):
+    retrieval_module = __import__(
+        "lsr_benchmark._commands._retrieval", fromlist=["_retrieval"]
+    )
+    dataset_dir = tmp_path / "dataset"
+    embedding_dir = tmp_path / "embedding"
+    execution_dir = tmp_path / "execution"
+    output_dir = tmp_path / "output"
+    dataset_dir.mkdir()
+    embedding_dir.mkdir()
+
+    class LocalExecution:
+        def run(self, output_dir, **kwargs):
+            print("stdout from execution")
+            print("stderr from execution", file=sys.stderr)
+            (Path(output_dir) / "raw.log").write_text("invalid")
+            raise RuntimeError("execution failed")
+
+    class TiraClient:
+        local_execution = LocalExecution()
+
+    monkeypatch.setattr(retrieval_module, "Client", TiraClient)
+    monkeypatch.setattr(
+        tira.third_party_integrations,
+        "temporary_directory",
+        lambda: execution_dir,
+    )
+    monkeypatch.setattr(
+        retrieval_module,
+        "check_format",
+        lambda *args: (retrieval_module.FormatMsgType.ERROR, "invalid output"),
+    )
+
+    with pytest.raises(ValueError, match="invalid output"):
+        retrieval_module.run_retrieval_engine(
+            "image", "command", dataset_dir, embedding_dir, output_dir
+        )
+
+    failed_dir = output_dir / ".failed"
+    assert (failed_dir / "output" / "raw.log").read_text() == "invalid"
+    assert "stdout from execution" in (failed_dir / "stdout.txt").read_text()
+    assert "stderr from execution" in (failed_dir / "stderr.txt").read_text()
+    assert "execution failed" in (failed_dir / "exception.txt").read_text()
+
+
 def test_report_retrieval_stats_reports_coverage():
     messages = []
 
@@ -458,12 +539,13 @@ def test_retrieval_command_calls_mocked_tira_local_execution(monkeypatch, tmp_pa
     output_root = tmp_path / "output"
     dataset_dir.mkdir()
     embedding_dir.mkdir()
-    execution_dir.mkdir()
-    (execution_dir / "retrieval-metadata.yml").write_text("tag: test\n")
     execution_arguments = {}
 
     class LocalExecution:
-        def run(self, **kwargs):
+        def run(self, output_dir, **kwargs):
+            output_dir = Path(output_dir)
+            (output_dir / "retrieval-metadata.yml").write_text("tag: test\n")
+            kwargs["output_dir"] = output_dir
             execution_arguments.update(kwargs)
 
     class TiraClient:
@@ -488,7 +570,9 @@ def test_retrieval_command_calls_mocked_tira_local_execution(monkeypatch, tmp_pa
         },
     )
     monkeypatch.setattr(
-        retrieval_module, "temporary_directory", lambda: execution_dir
+        tira.third_party_integrations,
+        "temporary_directory",
+        lambda: execution_dir,
     )
     monkeypatch.setattr(
         retrieval_module,
@@ -524,7 +608,7 @@ def test_retrieval_command_calls_mocked_tira_local_execution(monkeypatch, tmp_pa
         "image": "image/seismic",
         "command": "/run-seismic",
         "input_dir": dataset_dir.resolve(),
-        "output_dir": execution_dir,
+        "output_dir": execution_dir / "output",
         "allow_network": False,
         "input_run": embedding_dir.resolve(),
         "mount_directory": {"embeddings": embedding_dir.resolve()},
@@ -588,6 +672,31 @@ def test_retrieval_command_skips_existing_output_without_tira(monkeypatch, tmp_p
 
     assert result.exit_code == 0, result.output
     assert existing_output.is_dir()
+
+
+def test_retrieval_command_reruns_failed_output(mocked_retrieval, tmp_path):
+    _, calls = mocked_retrieval
+    failed_output = tmp_path / DATASET / EMBEDDING / "seismic" / ".failed"
+    failed_output.mkdir(parents=True)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "retrieval",
+            "--rerun-failed",
+            "--out",
+            str(tmp_path),
+            "--dataset",
+            DATASET,
+            "--embedding",
+            EMBEDDING,
+            "seismic",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    assert not failed_output.exists()
 
 
 def test_retrieval_command_reports_mocked_execution_failure(

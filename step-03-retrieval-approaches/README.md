@@ -5,8 +5,9 @@ This directory contains the retrieval engines that we currently have in the lsr_
 Instructions for contributors and coding agents are available in
 [Adding a Retrieval Approach](AGENTS.md).
 
-Currently, we have 11 retrieval engines that can run lsr retrieval:
+Currently, we have 12 retrieval engines that can run lsr retrieval:
 
+- [bmp](bmp)
 - [duckdb](duckdb)
 - [faiss](faiss)
 - [ioqp](ioqp)
@@ -29,7 +30,7 @@ Additionally, we have two lexical retrieval engines as baselines:
 The following code snippet runs all lsr retrieval engines on all embeddings and all datasets and stores the outputs in a directory `../runs`:
 
 ```
-lsr-benchmark retrieval -o ../runs duckdb faiss ioqp kannolo naive-search pyterrier-splade pyterrier-splade-pisa seismic sqlite pytorch-naive pyserini-lsr
+lsr-benchmark retrieval -o ../runs bmp duckdb faiss ioqp kannolo naive-search pyterrier-splade pyterrier-splade-pisa seismic sqlite pytorch-naive pyserini-lsr
 ```
 
 The following snippet runs all lexical retrieval engines on all datasets and stores the outputs in a directory `../runs`:
@@ -72,6 +73,10 @@ standard SPLADE embeddings, and produce a valid `run.txt` or `run.txt.gz`.
 
 We are in the progress of adding the following remaining retrieval engines:
 
+- [x] BMP: Major SIGIR 2024 learned-sparse retrieval engine with Python bindings. LSP builds on BMP concepts, but its `bmp` storage layout is not a direct BMP baseline.
+- [ ] Qdrant: Production-grade, Apache-2.0-licensed engine with native exact sparse-vector indexing, filtering, persistence, and hybrid retrieval.
+- [ ] Milvus: Production-grade vector database supporting arbitrary sparse float vectors with inner-product scoring and DAAT-MaxScore, DAAT-WAND, and TAAT query processing.
+- [ ] Vespa: Mature production search platform supporting weighted sparse vectors and WAND-based maximum-inner-product retrieval.
 - [ ] anserini: Carlos
 - [ ] naive with dictionaries or with rust: Cosimo
 - [ ] opensearch (Maybe a testcontainer as starting point?): Carlos
