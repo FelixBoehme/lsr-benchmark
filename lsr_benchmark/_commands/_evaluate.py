@@ -14,11 +14,14 @@ import ir_measures
 import pandas as pd
 import yaml
 from tira.check_format import lines_if_valid
+from tira.third_party_integrations import temporary_directory, default_tira_cache_dir
 from ir_measures import parse_trec_measure
+from ir_datasets.formats import TrecQrel
 
 import lsr_benchmark
-from lsr_benchmark.datasets import TIRA_DATASET_ID_TO_IR_DATASET_ID, all_embeddings
+from lsr_benchmark.datasets import TIRA_DATASET_ID_TO_IR_DATASET_ID, all_embeddings, all_dense_embeddings
 from lsr_benchmark._commands._modify_data import JOINT_TO_DATASETS
+from lsr_benchmark._commands._retrieval import retrieval
 
 if TYPE_CHECKING:
     from typing import _KT, _T, _VT, Any, Callable, Literal, Optional, Union
@@ -188,7 +191,7 @@ def __get_embedding_name(p: Path, metadata):
         if "data" in m and "embedding model" in m["data"]:
             return m["data"]["embedding model"]["name"]
 
-    for embedding in all_embeddings():
+    for embedding in all_embeddings() + list(all_dense_embeddings()):
         if embedding in str(Path(p)).split("/"):
             ret += [embedding]
     if '/none/' in str(p):
@@ -219,7 +222,7 @@ def __get_output_routine(specifier: str) -> "Callable[[pd.DataFrame], None]":
         raise ValueError(f"The suffix of {specifier} is not known.")
 
 
-def evaluate_approach(approach: str, measure: list[str], per_query: bool):
+def evaluate_approach(approach: str, measure: list[str], per_query: bool, exhaustive_truths: bool):
     ret = {}
     metadata, run = __read_metrics(approach)
     for group, meta in metadata.items():
@@ -237,6 +240,26 @@ def evaluate_approach(approach: str, measure: list[str], per_query: bool):
     dataset = __get_dataset_name(metadata)
     lsr_benchmark.register_to_ir_datasets(dataset)
     dset = lsr_benchmark.load(dataset)
+
+    if exhaustive_truths:
+        tmp_dir = temporary_directory()
+        emb_name = __get_embedding_name(approach, metadata)
+        if not emb_name:
+            raise ValueError("Unable to determine embedding model to be used for exhaustive search. Aborting!")
+        if dataset in JOINT_TO_DATASETS:
+            emb = Path(f"{default_tira_cache_dir()}/extracted_runs/lsr-benchmark/{dataset}/{emb_name}")
+        else:
+            emb = emb_name
+
+        retrieval(["numpy-exhaustive"], None, [dataset], [emb], None, None, None, tmp_dir)
+
+        qrels = []
+        with gzip.open(tmp_dir / dataset / emb_name / "numpy-exhaustive" / "run.txt.gz", "rt") as file:
+            for line in file:
+                qid, _, doc_id, _, _, _ = line.split()
+                qrels.append(TrecQrel(query_id=qid, doc_id=doc_id, relevance=1, iteration=0))
+        dset.qrels = qrels
+
     if not dset.has_qrels():
         raise ValueError(f"The dataset {dataset} has no qrels.")
 
@@ -317,7 +340,13 @@ def evaluate_approach(approach: str, measure: list[str], per_query: bool):
     is_flag=True,
     help="Whether to compute the metrics on a per-query basis."
 )
-def evaluate(approaches: list[str], measure: list[str], out: str, upload: bool, per_query: bool) -> int:
+@click.option(
+    "-e", "--exhaustive-truths",
+    type=bool,
+    is_flag=True,
+    help=""
+)
+def evaluate(approaches: list[str], measure: list[str], out: str, upload: bool, per_query: bool, exhaustive_truths: bool) -> int:
     approaches = [x for xs in map(glob, approaches) for x in xs]
     output_routine = __get_output_routine(out)
 
@@ -325,7 +354,7 @@ def evaluate(approaches: list[str], measure: list[str], out: str, upload: bool, 
     from tqdm import tqdm
     dataset_to_already_uploaded_approaches = {}
     for approach in tqdm(approaches):
-        scores_of_approach = evaluate_approach(approach, measure, per_query)
+        scores_of_approach = evaluate_approach(approach, measure, per_query, exhaustive_truths)
         scores += [scores_of_approach]
 
         if upload:
