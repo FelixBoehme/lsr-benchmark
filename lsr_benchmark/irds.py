@@ -85,47 +85,58 @@ def _dowload_from_tira(ir_datasets_id, truth_dataset):
         return Path(ir_datasets_id)
 
     from tira.rest_api_client import Client
+
     tira = Client()
+
+    def is_private(dataset_id):
+        return "-train" not in dataset_id and not in_tira_sandbox() and not tira.api_key_is_valid()
+
+    def qrels_lines(dataset_id):
+        if not is_private(dataset_id):
+            path = tira.download_dataset(task=None, dataset=dataset_id, truth_dataset=truth_dataset)
+            with open(path / "qrels.txt", "r") as f:
+                yield from f
+        else:
+            import ir_datasets
+
+            ds = ir_datasets.load(TIRA_DATASET_ID_TO_IR_DATASET_ID.get(dataset_id, dataset_id))
+            for qrel in ds.qrels_iter():
+                yield f"{qrel.query_id} 0 {qrel.doc_id} {qrel.relevance}"
 
     if ir_datasets_id in JOINT_TO_DATASETS and truth_dataset:
         ds = JOINT_TO_DATASETS[ir_datasets_id]
         doc_settings = ds["settings"].doc
         query_settings = ds["settings"].query
         datasets = ds["datasets"]
-        paths = [tira.download_dataset(task=None, dataset=ds_id, truth_dataset=truth_dataset) for ds_id in datasets]
+
         out_path = Path(f"{default_tira_cache_dir()}/extracted_datasets/None/{ir_datasets_id}/truth_data")
         out_path.mkdir(parents=True, exist_ok=True)
-
         seen = set()
-
         with open(out_path / "qrels.txt", "w") as out:
-            for ds_id, p in zip(datasets, paths):
-                with open(p / "qrels.txt", "r") as f:
-                    for line in f:
-                        query_id, iteration, doc_id, relevance = line.split()
+            for ds_id in datasets:
+                for line in qrels_lines(ds_id):
+                    query_id, iteration, doc_id, relevance = line.split()
 
-                        if query_settings == DuplicateBehaviour.PREFIX:
-                            query_id = f"{ds_id}_{query_id}"
-                        if doc_settings == DuplicateBehaviour.PREFIX:
-                            doc_id = f"{ds_id}_{doc_id}"
+                    if query_settings == DuplicateBehaviour.PREFIX:
+                        query_id = f"{ds_id}_{query_id}"
+                    if doc_settings == DuplicateBehaviour.PREFIX:
+                        doc_id = f"{ds_id}_{doc_id}"
 
-                        key = (query_id, doc_id)
-                        if key in seen:
-                            if DuplicateBehaviour.FAIL in (query_settings, doc_settings):
-                                raise ValueError(
-                                    f"Duplicate qrel entry across joined datasets: query={query_id}, doc={doc_id}"
-                                )
-                            continue
+                    key = (query_id, doc_id)
+                    if key in seen:
+                        if DuplicateBehaviour.FAIL in (query_settings, doc_settings):
+                            raise ValueError(
+                                f"Duplicate qrel entry across joined datasets: query={query_id}, doc={doc_id}"
+                            )
+                        continue
 
-                        seen.add(key)
-                        out.write(f"{query_id} {iteration} {doc_id} {relevance}\n")
-
+                    seen.add(key)
+                    out.write(f"{query_id} {iteration} {doc_id} {relevance}\n")
         return out_path
 
-    if '-train' not in ir_datasets_id and not in_tira_sandbox() and not tira.api_key_is_valid():
+    if is_private(ir_datasets_id):
         raise ValueError(f"The dataset {ir_datasets_id} is private, you can not access the raw data.")
     return tira.download_dataset(task=None, dataset=ir_datasets_id, truth_dataset=truth_dataset)
-
 
 class Segment(NamedTuple):
     offset_start: int
