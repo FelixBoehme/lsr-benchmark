@@ -80,7 +80,7 @@ def ir_datasets_from_tira(force_reload=False):
     return _IR_DATASETS_FROM_TIRA
 
 
-def _dowload_from_tira(ir_datasets_id, truth_dataset):
+def _download_from_tira(ir_datasets_id, truth_dataset):
     if os.path.isdir(ir_datasets_id):
         return Path(ir_datasets_id)
 
@@ -179,7 +179,7 @@ class LsrBenchmarkQueries(BaseQueries):
 
     def queries_iter(self):
         if not self.__queries_file:
-            self.__queries_file = _dowload_from_tira(self.__irds_id, False) / "queries.jsonl"
+            self.__queries_file = _download_from_tira(self.__irds_id, False) / "queries.jsonl"
 
         for q in QueryProcessorFormat().all_lines(self.__queries_file):
             yield GenericQuery(q["qid"], q["query"])
@@ -201,7 +201,7 @@ class LsrBenchmarkDocuments(BaseDocs):
 
     def docs(self):
         if not self.__corpus_file:
-            self.__corpus_file = _dowload_from_tira(self.__irds_id, False) / "corpus.jsonl.gz"
+            self.__corpus_file = _download_from_tira(self.__irds_id, False) / "corpus.jsonl.gz"
 
         reader = JsonlFormat()
         reader.apply_configuration_and_throw_if_invalid(
@@ -236,13 +236,13 @@ class LsrBenchmarkDataset(Dataset):
         else:
             class QrelsObj:
                 def stream(self):
-                    qrels_file = _dowload_from_tira(ir_datasets_id, True) / "qrels.txt"
+                    qrels_file = _download_from_tira(ir_datasets_id, True) / "qrels.txt"
                     return qrels_file.open("rb")
 
             class TmpTrecQrels(TrecQrels):
                 def qrels_iter(self):
                     try:
-                        _dowload_from_tira(ir_datasets_id, True)
+                        _download_from_tira(ir_datasets_id, True)
                     except Exception:
                         # Dataser could no be found on TIRA, fallback to ir_datasets
                         import ir_datasets
