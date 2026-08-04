@@ -1,6 +1,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from ir_measures import ScoredDoc, parse_measure
+from ir_datasets.formats import TrecQrel
 
 from lsr_benchmark._commands import _evaluate as evaluator
 
@@ -10,7 +12,7 @@ MODULE = "lsr_benchmark._commands._evaluate"
 @patch(f"{MODULE}.Path.is_dir", return_value=True)
 @patch(f"{MODULE}.lines_if_valid")
 @patch(f"{MODULE}.Path.is_file", return_value=True)
-@patch(f"{MODULE}.Path.read_text", return_value="dummy_run_content")  # Mock read_text here!
+@patch(f"{MODULE}.Path.read_text", return_value="dummy_run_content")
 @patch(f"{MODULE}.ir_measures.read_trec_run", return_value=["run_data"])
 def test_metadata_parsing(mock_read_run, mock_read_text, mock_is_file, mock_lines, mock_is_dir):
     mock_lines.return_value = [
@@ -26,20 +28,20 @@ def test_metadata_parsing(mock_read_run, mock_read_text, mock_is_file, mock_line
     assert metadata["myapproach"] == "standard_meta"
 
 
-@patch(f"{MODULE}.__read_metrics", return_value=({"group": {}}, ["run"]))
+@patch(f"{MODULE}.__read_metrics", return_value=({"group": {}}, [ScoredDoc("q1", "d1", 1.0)]))
 @patch(f"{MODULE}.__get_dataset_name", return_value="dataset-1")
 @patch(f"{MODULE}.__get_embedding_name", return_value="emb-1")
 @patch(f"{MODULE}.lsr_benchmark")
-@patch(f"{MODULE}.ir_measures.calc_aggregate", return_value={"P@10": 0.85})
-def test_aggregated_evaluation(mock_calc_agg, mock_lsr, mock_get_emb, mock_get_ds, mock_read):
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_aggregated_evaluation(mock_lsr, mock_get_emb, mock_get_ds, mock_read):
     mock_lsr.load.return_value.has_qrels.return_value = True
+    mock_lsr.load.return_value.qrels = [TrecQrel(query_id="q1", doc_id="d1", relevance=1, iteration=0)]
 
-    measure_mock = MagicMock()
-    measure_mock.__str__.return_value = "P@10"
+    measure = parse_measure("P@10")
 
-    result = evaluator.evaluate_approach("dummy", [("P_10", "ir_measure", measure_mock)], per_query=False)
+    result = evaluator.evaluate_approach("dummy", [("P_10", "ir_measure", measure)], per_query=False)
 
-    assert result["P@10"] == 0.85
+    assert result["P@10"] == pytest.approx(0.1)
     assert result["tira-dataset-id"] == "dataset-1"
     assert "micro-averages" not in result
     assert "macro-averages" not in result
