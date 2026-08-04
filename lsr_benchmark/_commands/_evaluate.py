@@ -293,7 +293,7 @@ def evaluate_approach(approach: str, measure: list[str], per_query: bool):
     required=False,
     multiple=True,
     default=["ndcg_cut.10", "nDCG(judged_only=True)@10", "P_10", "RR", "runtime_wallclock", "energy_total"],
-    help="The dataset id or a local directory.",
+    help="The measures to include in the evaluation.",
 )
 @click.option(
     "--upload",
