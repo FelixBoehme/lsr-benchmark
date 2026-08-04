@@ -39,7 +39,9 @@ def test_aggregated_evaluation(mock_lsr, mock_get_emb, mock_get_ds, mock_read):
 
     measure = parse_measure("P@10")
 
-    result = evaluator.evaluate_approach("dummy", [("P_10", "ir_measure", measure)], per_query=False)
+    result = evaluator.evaluate_approach(
+        "dummy", [("P_10", "ir_measure", measure)], per_query=False, exhaustive_truths=False
+    )
 
     assert result["P@10"] == pytest.approx(0.1)
     assert result["tira-dataset-id"] == "dataset-1"
@@ -73,7 +75,9 @@ def test_per_query_and_joint_evaluation(mock_calc, mock_lsr, mock_get_emb, mock_
         ),
     ]
 
-    result = evaluator.evaluate_approach("dummy", [("P_10", "ir_measure", measure_mock)], per_query=True)
+    result = evaluator.evaluate_approach(
+        "dummy", [("P_10", "ir_measure", measure_mock)], per_query=True, exhaustive_truths=False
+    )
 
     assert result["sub1"]["P@10"]["q1"] == 0.2
     assert result["sub2"]["P@10"]["q3"] == 0.8
@@ -83,3 +87,34 @@ def test_per_query_and_joint_evaluation(mock_calc, mock_lsr, mock_get_emb, mock_
 
     # Macro Average: (0.2 + 0.8) / 2 datasets = 0.5
     assert result["macro-averages"]["P@10"] == pytest.approx(0.5)
+
+
+@patch(f"{MODULE}.__read_metrics", return_value=({"group": {}}, [ScoredDoc("q1", "d1", 1.0)]))
+@patch(f"{MODULE}.__get_dataset_name", return_value="dataset-1")
+@patch(f"{MODULE}.__get_embedding_name", return_value="emb-1")
+@patch(f"{MODULE}.lsr_benchmark")
+@patch(f"{MODULE}.retrieval")
+@patch(f"{MODULE}.temporary_directory")
+@patch(f"{MODULE}.gzip.open")
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_exhaustive_truths_builds_qrels_from_run(
+    mock_gzip_open, mock_tmp_dir, mock_retrieval, mock_lsr, mock_get_emb, mock_get_ds, mock_read
+):
+    mock_lsr.load.return_value.has_qrels.return_value = True
+    mock_gzip_open.return_value.__enter__.return_value = ["q1 0 d1 1 1.0 run\n"]
+
+    measure = parse_measure("P@10")
+
+    result = evaluator.evaluate_approach(
+        "dummy", [("P_10", "ir_measure", measure)], per_query=False, exhaustive_truths=True
+    )
+
+    mock_retrieval.assert_called_once()
+
+    qrels = mock_lsr.load.return_value.qrels
+    assert len(qrels) == 1
+    assert qrels[0].query_id == "q1"
+    assert qrels[0].doc_id == "d1"
+    assert qrels[0].relevance == 1
+
+    assert result["P@10"] == pytest.approx(0.1)
