@@ -9,7 +9,7 @@ from tira.third_party_integrations import default_tira_cache_dir
 
 from ._commands._evaluate import evaluate
 from ._commands._retrieval import retrieval
-from ._commands._download import download_embeddings, download_run
+from ._commands._download import get_embeddings, download_run
 from ._commands._verify_installation import verify_installation
 from ._commands.sisap_io import sisap_to_qrels, sisap_to_trec_run
 from ._commands._modify_data import modify_data, JOINT_TO_DATASETS
@@ -119,7 +119,7 @@ def overview():
     print(f"Overview of the lsr-benchmark:\n\n\t- {overall_datasets} Datasets with {len(overall_embeddings)} pre-computed embeddings ({f(overall_size)})\n\nDatasets:\n{df_dataset.sort_values('Dataset')}\n\nEmbeddings:\n{df_embeddings}")
 
 
-main.command()(download_embeddings)
+main.command(name="download-embeddings")(get_embeddings)
 main.command()(download_run)
 main.command()(evaluate)
 main.command()(retrieval)

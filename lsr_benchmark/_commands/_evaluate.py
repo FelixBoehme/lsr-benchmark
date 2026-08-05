@@ -169,7 +169,13 @@ def __get_dataset_name(metadata: Dict[str, Any]) -> str:
     candidates = set()
 
     for k, m in metadata.items():
-        if "data" in m and "test collection" in m["data"] and "name" in m["data"]["test collection"] and m["data"]["test collection"]["name"]:
+        if (
+            "data" in m
+            and "test collection" in m["data"]
+            and "name" in m["data"]["test collection"]
+            and m["data"]["test collection"]["name"]
+            and "subsample of" not in m["data"]["test collection"]
+        ):
             candidates.add(m["data"]["test collection"]["name"])
 
     candidates = [i for i in candidates if i != '/tira-data/input']
