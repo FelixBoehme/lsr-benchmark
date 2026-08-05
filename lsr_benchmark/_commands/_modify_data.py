@@ -12,6 +12,7 @@ from tira.rest_api_client import Client
 from tira.third_party_integrations import default_tira_cache_dir, temporary_directory
 from tqdm import tqdm
 
+from lsr_benchmark._commands.download_embeddings import download_embeddings
 from lsr_benchmark.datasets import all_datasets, all_dense_embeddings, all_embeddings
 
 
@@ -65,24 +66,6 @@ JOINT_TO_DATASETS = {
         ],
     },
 }
-
-
-def get_embedding_path(embedding: str, dataset_id: str, tira: Client) -> Path:
-    if embedding in {
-        "e5-mistral-7b-instruct",
-        "SFR-Embedding-Mistral",
-        "Linq-Embed-Mistral",
-        "Octen-Embedding-8B",
-        "Qwen3-Embedding-8B",
-        "speed-embedding-7b-instruct",
-    }:
-        embeddings_dir = tira.get_run_output(f"lsr-benchmark/mteb/{embedding}", dataset_id)
-    elif embedding in all_dense_embeddings():
-        embeddings_dir = tira.get_run_output(f"lsr-benchmark/sentence-transformers/{embedding}", dataset_id)
-    else:
-        embeddings_dir = tira.get_run_output(f"lsr-benchmark/lightning-ir/{embedding}", dataset_id)
-
-    return embeddings_dir
 
 
 def prefix_json(
@@ -212,7 +195,8 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
     duplicate_handling = joint_dataset["settings"]
     mappings = [f"d{i}" for i in range(len(individual_datasets))]
 
-    embedding_paths = [get_embedding_path(embedding, d, tira) for d in individual_datasets]
+    tira = Client()
+    embedding_paths = [download_embeddings(embedding, d, tira) for d in individual_datasets]
 
     tmp = temporary_directory()
     (tmp / "doc").mkdir(parents=True, exist_ok=True)
@@ -255,6 +239,11 @@ def perform_embedding_join(dataset: str, embedding: str, tira: Client, tira_dir:
             src_meta = path / meta_file
             dest_meta = meta_out_dir / f"{mapping}-{emb_type}-ir-metadata.yml"
             shutil.copy(src_meta, dest_meta)
+            with open(dest_meta, "r") as f:
+                meta = yaml.safe_load(f)
+            meta["data"]["test collection"]["subsample of"] = dataset
+            with open(dest_meta, "w") as f:
+                yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
 
     for emb_type, emb_file in [("doc", "doc/doc-embeddings.npz"), ("query", "query/query-embeddings.npz")]:
         merged_embeddings = load_and_merge_embeddings(embedding_paths, emb_file, keep_masks[emb_type])
@@ -405,7 +394,7 @@ def modify_data(
                             f"'{emb}' embeddings don't exist yet for '{dataset}'. Retry with '-j' or '--join'. Aborting!"
                         )
                 else:
-                    emb_path = get_embedding_path(emb, dataset, tira)
+                    emb_path = download_embeddings(emb, dataset, tira)
 
                 for level in quantization:
                     created_embedding_dirs.append(

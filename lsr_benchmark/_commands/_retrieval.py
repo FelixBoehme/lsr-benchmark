@@ -22,11 +22,13 @@ from lsr_benchmark.datasets import (
 )
 from lsr_benchmark._commands._verify_installation import EXAMPLE_RETRIEVAL_ENGINE
 from lsr_benchmark._commands._modify_data import JOINT_TO_DATASETS
+from lsr_benchmark._commands.download_embeddings import download_embeddings
 from lsr_benchmark.retrieval_suites import RETRIEVAL_SUITES
 import shutil
 import yaml
 from tira.io_utils import docker_supported_target_platform
 import os
+import itertools
 
 
 def run_retrieval_engine(
@@ -48,16 +50,8 @@ def run_retrieval_engine(
     else:
         dataset_path = temporary_directory()
 
-    if isinstance(embedding, Path):
-        embeddings_dir = embedding.resolve()
-    elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
-        embeddings_dir = tira.get_run_output(f'lsr-benchmark/lightning-ir/{embedding}', dataset_id)
-    elif embedding.lower() != "none" and embedding in set(["e5-mistral-7b-instruct", "SFR-Embedding-Mistral", "Linq-Embed-Mistral", "Octen-Embedding-8B", "Qwen3-Embedding-8B", "speed-embedding-7b-instruct"]):
-        embeddings_dir = tira.get_run_output(f'lsr-benchmark/mteb/{embedding}', dataset_id)
-    elif embedding.lower() != "none" and embedding in all_dense_embeddings():
-        embeddings_dir = tira.get_run_output(f'lsr-benchmark/sentence-transformers/{embedding}', dataset_id)
-    else:
-        embeddings_dir = None
+    embeddings_dir = download_embeddings(embedding, dataset_id, tira)
+
     mount_directory = None
     if embeddings_dir:
         mount_directory = {"embeddings": embeddings_dir}
@@ -196,7 +190,29 @@ def resolve_retrieval_configuration(suite, approaches, datasets, embeddings):
 
 def normalize_retrieval_inputs(datasets, embeddings):
     """Expand default/all inputs and validate local dataset/embedding pairs."""
-    if not datasets or "all" in datasets:
+    is_paired = False
+
+    if not datasets and embeddings and all(isinstance(e, Path) for e in embeddings):
+        is_paired = True
+        datasets = []
+        for e in embeddings:
+            meta_file = e / "doc"
+            if (meta_file / "doc-ir-metadata.yml").exists():
+                meta_file /= "doc-ir-metadata.yml"
+            elif (meta_file / "d0-doc-ir-metadata.yml").exists():
+                meta_file /= "d0-doc-ir-metadata.yml"
+            else:
+                raise FileNotFoundError("No metadata file found to retrieve dataset from. Aborting!")
+            with open(e / meta_file, "r") as f:
+                meta = yaml.safe_load(f)
+            test_collecton = meta["data"]["test collection"]
+            if "subsample of" in test_collecton:
+                datasets.append(test_collecton["subsample of"])
+            else:
+                datasets.append(test_collecton["name"])
+    elif (not datasets or "all" in datasets) and any(isinstance(e, Path) for e in embeddings):
+        raise ValueError("Can't use both local and remote embeddings when running on all datasets. Aborting!")
+    elif not datasets or "all" in datasets:
         datasets = all_datasets()
 
     if not embeddings or "all" in embeddings:
@@ -212,7 +228,7 @@ def normalize_retrieval_inputs(datasets, embeddings):
                     "embeddings! Aborting."
                 )
 
-    return datasets, embeddings
+    return datasets, embeddings, is_paired
 
 
 def validate_retrieval_selection(approaches, datasets, embeddings, print_message):
@@ -271,41 +287,49 @@ def build_retrieval_jobs(
     embeddings,
     approach_to_execution: Mapping[str, Mapping[str, str]],
     output_root: Path,
+    is_paired: bool,
 ):
     """Build deterministic jobs for the dataset/embedding/approach product."""
     jobs = []
-    for dataset in datasets:
+
+    if is_paired:
+        dataset_embedding_pairs = zip(datasets, embeddings)
+    else:
+        dataset_embedding_pairs = itertools.product(datasets, embeddings)
+
+    for dataset, embedding in dataset_embedding_pairs:
         dataset_name = dataset.stem if isinstance(dataset, Path) else dataset
-        for embedding in embeddings:
-            embedding_name = embedding
-            quant_suffix = ""
-            if isinstance(embedding, Path):
-                embedding_name = embedding.stem
-                meta_path = embedding / "doc" / f"{'d0-' if dataset_name in JOINT_TO_DATASETS else ''}doc-ir-metadata.yml"
-                with open(meta_path) as f:
-                    meta = yaml.safe_load(f)
-                test_collection = meta["data"]["test collection"]
-                if "quantization" in test_collection:
-                    quant_suffix = f"-{test_collection['quantization']}"
-            for approach in approaches:
-                execution = approach_to_execution[approach]
-                jobs.append(
-                    RetrievalJob(
-                        approach=approach,
-                        dataset=dataset,
-                        embedding=embedding,
-                        dataset_name=dataset_name,
-                        embedding_name=embedding_name,
-                        image=execution["tag"],
-                        command=execution["command"],
-                        output_dir=(
-                            output_root
-                            / (dataset_name + quant_suffix)
-                            / embedding_name
-                            / approach
-                        ),
-                    )
+        embedding_name = embedding
+        quant_suffix = ""
+
+        if isinstance(embedding, Path):
+            embedding_name = embedding.stem
+            meta_path = embedding / "doc" / f"{'d0-' if dataset_name in JOINT_TO_DATASETS else ''}doc-ir-metadata.yml"
+            with open(meta_path) as f:
+                meta = yaml.safe_load(f)
+            test_collection = meta["data"]["test collection"]
+            if "quantization" in test_collection:
+                quant_suffix = f"-{test_collection['quantization']}"
+
+        for approach in approaches:
+            execution = approach_to_execution[approach]
+            jobs.append(
+                RetrievalJob(
+                    approach=approach,
+                    dataset=dataset,
+                    embedding=embedding,
+                    dataset_name=dataset_name,
+                    embedding_name=embedding_name,
+                    image=execution["tag"],
+                    command=execution["command"],
+                    output_dir=(
+                        output_root
+                        / (dataset_name + quant_suffix)
+                        / embedding_name
+                        / approach
+                    ),
                 )
+            )
     return tuple(jobs)
 
 
@@ -427,7 +451,7 @@ def retrieval(
     approaches, dataset, embedding = resolve_retrieval_configuration(
         suite, approaches, dataset, embedding
     )
-    dataset, embedding = normalize_retrieval_inputs(dataset, embedding)
+    dataset, embedding, is_paired = normalize_retrieval_inputs(dataset, embedding)
     if not validate_retrieval_selection(
         approaches, dataset, embedding, print_message
     ):
@@ -441,7 +465,7 @@ def retrieval(
         approaches, platform, embedding, print_message
     )
     jobs = build_retrieval_jobs(
-        approaches, dataset, embedding, approach_to_execution, Path(out)
+        approaches, dataset, embedding, approach_to_execution, Path(out), is_paired
     )
     stats, failures = execute_retrieval_jobs(
         jobs, platform, cpus, memory, print_message, rerun_failed

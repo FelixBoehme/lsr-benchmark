@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import yaml
 
 import pytest
 from click.testing import CliRunner
@@ -80,19 +81,21 @@ def test_normalize_retrieval_inputs_expands_defaults(monkeypatch):
     monkeypatch.setattr(retrieval_module, "all_datasets", lambda: ["dataset"])
     monkeypatch.setattr(retrieval_module, "all_embeddings", lambda: ["embedding"])
 
-    datasets, embeddings = normalize_retrieval_inputs((), ())
+    datasets, embeddings, is_paired = normalize_retrieval_inputs((), ())
 
     assert datasets == ["dataset"]
     assert embeddings == ["embedding"]
+    assert not is_paired
 
 
 def test_normalize_retrieval_inputs_prioritizes_none_embedding():
-    datasets, embeddings = normalize_retrieval_inputs(
+    datasets, embeddings, is_paired = normalize_retrieval_inputs(
         [DATASET], [EMBEDDING, "none"]
     )
 
     assert datasets == [DATASET]
     assert embeddings == ["none"]
+    assert not is_paired
 
 
 def test_validate_retrieval_selection_reports_first_missing_input():
@@ -197,6 +200,7 @@ def test_build_retrieval_jobs_creates_deterministic_product(tmp_path):
             "kannolo": {"tag": "image/kannolo", "command": "/run-kannolo"},
         },
         tmp_path,
+        is_paired=False
     )
 
     assert [job.approach for job in jobs] == ["seismic", "kannolo"]
@@ -743,3 +747,76 @@ def test_retrieval_command_reports_mocked_execution_failure(
     assert "mocked retrieval failure" in result.output
     assert "1 retrieval configuration(s) failed" in result.output
     assert attempted_approaches == ["image/seismic", "image/kannolo"]
+
+
+def test_paired_local_embeddings(tmp_path):
+    emb1_dir = tmp_path / "embedding_model_A"
+    emb2_dir = tmp_path / "embedding_model_B"
+
+    mock_setup = [(emb1_dir, "dataset_alpha"), (emb2_dir, "dataset_beta")]
+
+    for emb_dir, dataset_name in mock_setup:
+        doc_dir = emb_dir / "doc"
+        doc_dir.mkdir(parents=True)
+        meta_file = doc_dir / "doc-ir-metadata.yml"
+
+        metadata = {"data": {"test collection": {"name": dataset_name}}}
+        with open(meta_file, "w") as f:
+            yaml.dump(metadata, f)
+
+    input_datasets = []
+    input_embeddings = [emb1_dir, emb2_dir]
+
+    datasets, embeddings, is_paired = normalize_retrieval_inputs(input_datasets, input_embeddings)
+
+    assert is_paired is True
+    assert datasets == ["dataset_alpha", "dataset_beta"]
+    assert embeddings == [emb1_dir, emb2_dir]
+
+    approaches = ["baseline_approach"]
+    approach_to_exec = {"baseline_approach": {"tag": "mock-image:latest", "command": "run.sh"}}
+    output_root = tmp_path / "output"
+
+    jobs = build_retrieval_jobs(
+        approaches=approaches,
+        datasets=datasets,
+        embeddings=embeddings,
+        approach_to_execution=approach_to_exec,
+        output_root=output_root,
+        is_paired=is_paired,
+    )
+
+    assert len(jobs) == 2
+
+    assert jobs[0].dataset_name == "dataset_alpha"
+    assert jobs[0].embedding_name == "embedding_model_A"
+    assert jobs[0].approach == "baseline_approach"
+
+    assert jobs[1].dataset_name == "dataset_beta"
+    assert jobs[1].embedding_name == "embedding_model_B"
+    assert jobs[1].approach == "baseline_approach"
+
+
+def test_unpaired_retrieval(tmp_path):
+    datasets = ["dataset_alpha", "dataset_beta"]
+    embeddings = ["embedding_A", "embedding_B"]
+
+    approaches = ["baseline_approach"]
+    approach_to_exec = {"baseline_approach": {"tag": "mock-image:latest", "command": "run.sh"}}
+
+    jobs = build_retrieval_jobs(
+        approaches=approaches,
+        datasets=datasets,
+        embeddings=embeddings,
+        approach_to_execution=approach_to_exec,
+        output_root=tmp_path / "output",
+        is_paired=False,
+    )
+
+    assert len(jobs) == 4
+
+    combinations = [(job.dataset_name, job.embedding_name) for job in jobs]
+    assert ("dataset_alpha", "embedding_A") in combinations
+    assert ("dataset_alpha", "embedding_B") in combinations
+    assert ("dataset_beta", "embedding_A") in combinations
+    assert ("dataset_beta", "embedding_B") in combinations

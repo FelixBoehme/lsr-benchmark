@@ -5,6 +5,7 @@ from lsr_benchmark.datasets import (
     all_embeddings, all_dense_embeddings, all_ir_datasets,
     IR_DATASET_TO_TIRA_DATASET, EMBEDDING_MODEL_TO_ENGINE
 )
+from lsr_benchmark._commands.download_embeddings import download_embeddings
 from shutil import copytree
 
 from .sisap_io import MissingSisapDependencyError, export_embeddings_to_sisap
@@ -37,12 +38,12 @@ from .sisap_io import MissingSisapDependencyError, export_embeddings_to_sisap
     default="reneuir",
     help="The output format to write.",
 )
-def download_embeddings(dataset, embedding, out, export_format):
+def get_embeddings(dataset, embedding, out, export_format):
     tira = Client()
     engine = EMBEDDING_MODEL_TO_ENGINE.get(embedding, "lightning-ir")
     tira_dataset = IR_DATASET_TO_TIRA_DATASET[dataset]
-    embedding_id = f'lsr-benchmark/{engine}/{embedding}'
-    source_dir = Path(tira.get_run_output(embedding_id, tira_dataset))
+    embedding_id = f"lsr-benchmark/{engine}/{embedding}"
+    source_dir = download_embeddings(embedding, tira_dataset, tira)
     ret = source_dir
     if export_format == "sisap":
         if out is None:
