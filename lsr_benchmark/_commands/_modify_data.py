@@ -59,10 +59,10 @@ JOINT_TO_DATASETS = {
     "clueweb09-en-trec-web-2009+2010+2011+2012": {
         "settings": DuplicateHandling(docs=DuplicateBehaviour.SKIP),
         "datasets": [
-            "clueweb09/en/trec-web-2009",
-            "clueweb09/en/trec-web-2010",
-            "clueweb09/en/trec-web-2011",
-            "clueweb09/en/trec-web-2012",
+            "trec-18-web-20251008-test",
+            "trec-19-web-20251008-test",
+            "trec-20-web-20251008-test",
+            "trec-21-web-20251008-test",
         ],
     },
 }
