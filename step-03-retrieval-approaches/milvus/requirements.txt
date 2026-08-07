@@ -1,0 +1,2 @@
+lsr-benchmark
+pymilvus==2.6.4

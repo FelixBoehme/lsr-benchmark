@@ -18,6 +18,7 @@ jobs:
           - duckdb
           - faiss
           - kannolo
+          - milvus
           - naive-search
           - numpy-exhaustive
           - pyterrier-splade
