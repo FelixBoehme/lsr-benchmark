@@ -5,7 +5,7 @@ This directory contains the retrieval engines that we currently have in the lsr_
 Instructions for contributors and coding agents are available in
 [Adding a Retrieval Approach](AGENTS.md).
 
-Currently, we have 14 retrieval engines that can run lsr retrieval:
+Currently, we have 15 retrieval engines that can run lsr retrieval:
 
 - [bmp](bmp)
 - [duckdb](duckdb)
@@ -20,6 +20,7 @@ Currently, we have 14 retrieval engines that can run lsr retrieval:
 - [pytorch-naive](pytorch-naive)
 - [seismic](seismic)
 - [sqlite](sqlite)
+- [vespa](vespa)
 
 Additionally, we have two lexical retrieval engines as baselines:
 
@@ -77,7 +78,7 @@ We are in the progress of adding the following remaining retrieval engines:
 - [x] BMP: Major SIGIR 2024 learned-sparse retrieval engine with Python bindings. LSP builds on BMP concepts, but its `bmp` storage layout is not a direct BMP baseline.
 - [ ] Qdrant: Production-grade, Apache-2.0-licensed engine with native exact sparse-vector indexing, filtering, persistence, and hybrid retrieval.
 - [x] Milvus: Production-grade vector database supporting arbitrary sparse float vectors with inner-product scoring and DAAT-MaxScore, DAAT-WAND, and TAAT query processing.
-- [ ] Vespa: Mature production search platform supporting weighted sparse vectors and WAND-based maximum-inner-product retrieval.
+- [x] Vespa: Mature production search platform supporting weighted sparse vectors and WAND-based maximum-inner-product retrieval.
 - [ ] anserini: Carlos
 - [ ] naive with dictionaries or with rust: Cosimo
 - [ ] opensearch (Maybe a testcontainer as starting point?): Carlos
