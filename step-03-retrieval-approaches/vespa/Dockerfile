@@ -58,8 +58,6 @@ COPY vespa_retrieval.py /index-and-retrieve.py
 RUN chmod +x /index-and-retrieve.py \
     && chmod a+rx /var/lib/private
 
-USER vespa
-
 WORKDIR /tmp
 
 ENTRYPOINT ["python3", "/index-and-retrieve.py"]
