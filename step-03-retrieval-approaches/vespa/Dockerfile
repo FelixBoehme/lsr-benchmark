@@ -1,12 +1,14 @@
 FROM ubuntu:20.04 AS cpp-runtime
 
-RUN cp "$(find /usr/lib -name 'libstdc++.so.6.*' -print -quit)" /libstdc++.so.6
+RUN cp "$(find /usr/lib -name 'libstdc++.so.6.*' -print -quit)" /libstdc++.so.6 \
+    && cp "$(find /usr/lib -name 'libbz2.so.1.0' -print -quit)" /libbz2.so.1.0
 
 FROM vespaengine/vespa:8
 
 USER root
 
 COPY --from=cpp-runtime /libstdc++.so.6 /opt/compat-lib/libstdc++.so.6
+COPY --from=cpp-runtime /libbz2.so.1.0 /opt/compat-lib/libbz2.so.1.0
 
 ENV HOME=/tmp
 ENV LD_LIBRARY_PATH=/opt/compat-lib
