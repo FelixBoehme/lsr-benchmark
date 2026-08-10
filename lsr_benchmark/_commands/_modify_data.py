@@ -263,12 +263,14 @@ def perform_quantization(
     embedding_path: Path,
     precision: Literal["fp16", "int8", "uint8", "ternary", "binary"],
     quant_range: int | None,
+    keep_dtype: bool,
     dataset: str,
     embedding: str,
     tira_dir: str,
 ) -> Path:
     range_suffix = f"-{quant_range}" if quant_range and precision.endswith("int8") else ""
-    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}-{precision}{range_suffix}/{embedding}")
+    keep_suffix = "-original_dtype" if keep_dtype else ""
+    emb_result_path = Path(f"{tira_dir}/extracted_runs/lsr-benchmark/{dataset}-{precision}{range_suffix}{keep_suffix}/{embedding}")
 
     if emb_result_path.exists():
         return emb_result_path
@@ -282,6 +284,8 @@ def perform_quantization(
             data = npz["data"]
             indices = npz["indices"]
             indptr = npz["indptr"]
+
+        original_dtype = data.dtype
 
         if precision == "fp16":
             data = data.astype(np.float16)
@@ -315,6 +319,9 @@ def perform_quantization(
         if precision == "binary":
             data = (data > 0).astype(np.int8)
 
+        if keep_dtype:
+            data = data.astype(original_dtype)
+
         np.savez_compressed(tmp / dirPath, data=data, indices=indices, indptr=indptr)
         shutil.copy(embedding_path / directory / f"{directory}-ids.txt", tmp / directory)
 
@@ -327,6 +334,8 @@ def perform_quantization(
             with open(embedding_path / directory / file, "r") as f:
                 meta = yaml.safe_load(f)
             meta["data"]["test collection"]["quantization"] = precision
+            if keep_dtype:
+                meta["data"]["test collection"]["original datatype"] = True
             with open(tmp / directory / file, "w") as f:
                 yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
 
@@ -355,6 +364,9 @@ def perform_quantization(
 @click.option(
     "-r", "--quant-range", type=int, help="Percentage of values to include while quantizing to avoid outliers"
 )
+@click.option(
+    "-k", "--keep-dtype", type=bool, is_flag=True, help="Whether to keep the original datatype after quantizing."
+)
 def modify_data(
     datasets: list[str],
     embedding: list[str],
@@ -362,6 +374,7 @@ def modify_data(
     join_embeddings: bool,
     quantization: list[str],
     quant_range: int | None,
+    keep_dtype: bool,
 ) -> int:
     if not join_corpora and not join_embeddings and not quantization:
         raise click.UsageError("No modification chosen! Aborting.")
@@ -398,7 +411,7 @@ def modify_data(
 
                 for level in quantization:
                     created_embedding_dirs.append(
-                        perform_quantization(emb_path, level, quant_range, dataset, emb, tira_dir)
+                        perform_quantization(emb_path, level, quant_range, keep_dtype, dataset, emb, tira_dir)
                     )
 
     click.echo("\nFollowing paths have been created:")

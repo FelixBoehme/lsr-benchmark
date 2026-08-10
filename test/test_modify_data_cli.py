@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 import yaml
 
-from lsr_benchmark._commands._modify_data import DuplicateBehaviour, load_and_merge_embeddings, perform_quantization, prefix_json
+from lsr_benchmark._commands._modify_data import (
+    DuplicateBehaviour,
+    load_and_merge_embeddings,
+    perform_quantization,
+    prefix_json,
+)
 
 
 def test_load_and_merge_embeddings(tmp_path):
@@ -117,17 +122,17 @@ def test_perform_quantization_basic_precisions(tmp_path):
     create_mock_embedding_dir(emb_path, data, indices, indptr)
 
     # Binary
-    out_bin = perform_quantization(emb_path, "binary", None, "test-ds", "emb-model", str(tira_dir))
+    out_bin = perform_quantization(emb_path, "binary", None, False, "test-ds", "emb-model", str(tira_dir))
     with np.load(out_bin / "doc" / "doc-embeddings.npz") as npz:
         assert np.array_equal(npz["data"], np.array([0, 0, 1, 1], dtype=np.int8))
 
     # Ternary
-    out_ter = perform_quantization(emb_path, "ternary", None, "test-ds", "emb-model", str(tira_dir))
+    out_ter = perform_quantization(emb_path, "ternary", None, False, "test-ds", "emb-model", str(tira_dir))
     with np.load(out_ter / "doc" / "doc-embeddings.npz") as npz:
         assert np.array_equal(npz["data"], np.array([-1, 0, 1, 1], dtype=np.int8))
 
     # FP16
-    out_fp = perform_quantization(emb_path, "fp16", None, "test-ds", "emb-model", str(tira_dir))
+    out_fp = perform_quantization(emb_path, "fp16", None, False, "test-ds", "emb-model", str(tira_dir))
     with np.load(out_fp / "doc" / "doc-embeddings.npz") as npz:
         assert npz["data"].dtype == np.float16
         assert np.allclose(npz["data"], data.astype(np.float16))
@@ -158,12 +163,28 @@ def test_perform_quantization_8bit_scaling(tmp_path):
     #   Doc 1: 100 -> 0.
     #   Doc 2: 150 -> floor((150 - 100) / 0.3921) = floor(127.5) = 127.
     #   Doc 3: 200 -> 255.
-    out_uint8 = perform_quantization(emb_path, "uint8", None, "test-ds-2", "emb-model", str(tira_dir))
+    out_uint8 = perform_quantization(emb_path, "uint8", None, False, "test-ds-2", "emb-model", str(tira_dir))
     with np.load(out_uint8 / "doc" / "doc-embeddings.npz") as npz:
         assert npz["data"].dtype == np.uint8
         assert np.array_equal(npz["data"], np.array([0, 0, 127, 127, 255, 255], dtype=np.uint8))
 
-    out_int8 = perform_quantization(emb_path, "int8", None, "test-ds-3", "emb-model", str(tira_dir))
+    out_int8 = perform_quantization(emb_path, "int8", None, False, "test-ds-3", "emb-model", str(tira_dir))
     with np.load(out_int8 / "doc" / "doc-embeddings.npz") as npz:
         assert npz["data"].dtype == np.int8
         assert np.array_equal(npz["data"], np.array([-128, -128, -1, -1, 127, 127], dtype=np.int8))
+
+
+@pytest.mark.parametrize("precision", ["binary", "ternary", "int8", "fp16"])
+def test_perfrom_quantization_keep_dtype(tmp_path, precision):
+    emb_path = tmp_path / "input"
+    tira_dir = tmp_path / "tira"
+
+    dtype = np.float32
+    data = np.array([-2.5, 0.0, 1.5, 3.0], dtype=dtype)
+    indices = np.array([0, 1, 0, 1])
+    indptr = np.array([0, 2, 4])
+    create_mock_embedding_dir(emb_path, data, indices, indptr)
+
+    out = perform_quantization(emb_path, precision, None, True, "test-ds", "emb-model", str(tira_dir))
+    with np.load(out / "doc" / "doc-embeddings.npz") as npz:
+        assert npz["data"].dtype == dtype
