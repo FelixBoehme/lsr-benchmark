@@ -1,12 +1,13 @@
 from pathlib import Path
 
-from tira.io_utils import patch_ir_metadata
+import yaml
 
 from lsr_benchmark.datasets import all_dense_embeddings
 
 
 def download_embeddings(embedding: str | Path, dataset: str, tira) -> Path:
-    if isinstance(embedding, Path):
+    emb_is_path = isinstance(embedding, Path)
+    if emb_is_path:
         embeddings_dir = embedding.resolve()
     elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f"lsr-benchmark/lightning-ir/{embedding}", dataset)
@@ -27,10 +28,17 @@ def download_embeddings(embedding: str | Path, dataset: str, tira) -> Path:
         raise ValueError(f"Unable to download unknown embeddings {embedding!r} for dataset {dataset!r}. Aborting!")
 
     for folder in ["doc", "query"]:
-        patch_ir_metadata(
-            embeddings_dir / folder,
-            {"data": {"test collection": {"name": "/tira-data/input"}}},
-            {"data": {"test collection": {"name": dataset}}},
-        )
+        meta_file = embeddings_dir / folder / f"{folder}-ir-metadata.yml"
+        with open(meta_file, "r") as f:
+            meta = yaml.safe_load(f)
+
+        if "data" in meta:
+            if "test collection" in meta["data"] and "name" in meta["data"]["test collection"]:
+                meta["data"]["test collection"]["name"] = dataset
+            if not emb_is_path:
+                meta["data"]["embedding model"] = {"name": embedding}
+
+            with open(meta_file, "w") as f:
+                yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
 
     return embeddings_dir

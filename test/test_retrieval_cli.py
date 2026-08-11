@@ -326,6 +326,11 @@ def test_run_retrieval_engine_copies_invalid_output_to_failed(
     )
     monkeypatch.setattr(
         retrieval_module,
+        "download_embeddings",
+        lambda *args: embedding_dir
+    )
+    monkeypatch.setattr(
+        retrieval_module,
         "check_format",
         lambda *args: (retrieval_module.FormatMsgType.ERROR, "invalid output"),
     )
@@ -587,6 +592,11 @@ def test_retrieval_command_calls_mocked_tira_local_execution(monkeypatch, tmp_pa
         tira.third_party_integrations,
         "temporary_directory",
         lambda: execution_dir,
+    )
+    monkeypatch.setattr(
+        retrieval_module,
+        "download_embeddings",
+        lambda *args: embedding_dir
     )
     monkeypatch.setattr(
         retrieval_module,
