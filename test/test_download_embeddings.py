@@ -54,9 +54,6 @@ def test_download_embeddings_with_path(tmp_path, mock_tira):
     assert result == embedding_path.resolve()
     mock_tira.get_run_output.assert_not_called()
 
-    for meta in read_meta_files(result).values():
-        assert meta["data"]["test collection"]["name"] == "my_dataset"
-
 
 @pytest.mark.parametrize(
     "embedding, expected_run_id",

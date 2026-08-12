@@ -8,7 +8,7 @@ from lsr_benchmark.datasets import all_dense_embeddings
 def download_embeddings(embedding: str | Path, dataset: str, tira) -> Path:
     emb_is_path = isinstance(embedding, Path)
     if emb_is_path:
-        embeddings_dir = embedding.resolve()
+        return embedding.resolve()
     elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f"lsr-benchmark/lightning-ir/{embedding}", dataset)
     elif embedding.lower() != "none" and embedding in set(
