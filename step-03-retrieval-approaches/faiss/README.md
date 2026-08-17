@@ -2,7 +2,7 @@
 
 Exact inner-product retrieval with [FAISS](https://github.com/facebookresearch/faiss).
 Sparse learned-retrieval embeddings are converted to dense `float32` vectors and
-indexed with `faiss.IndexFlatIP`.
+indexed with `faiss.IndexFlatIP`, `faiss.IndexHNSWFlat` or `faiss.IndexIVFFlat` and their binary counterparts `faiss.IndexBinaryFlat`, `faiss.IndexBinaryHNSW`, `faiss.IndexBinaryIVF`.
 
 ## Development
 
@@ -32,7 +32,12 @@ python faiss_retrieval.py \
     --k 1000
 ```
 
-Use `--batch-size` to control how many queries FAISS searches at once.
+Additional options:
+- `--batch-size` controls how many queries FAISS searches at once
+- `--index-type` sets the type of index to be used (default `faiss.IndexFlatIP`)
+- `--M` sets parameter for the HNSW Index
+- `--nlists`, `--nprobe` sets parameter for the IVF Index
+- `--binary` sets index to the binary variant of the select type
 
 ## Submission
 

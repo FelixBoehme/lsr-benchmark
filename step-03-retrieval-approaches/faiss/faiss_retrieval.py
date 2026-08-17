@@ -32,16 +32,44 @@ def to_dense_matrix(embeddings, dimension):
     return embedding_ids, matrix
 
 
-def build_index(doc_embeddings):
+def build_index(doc_embeddings, index_type, M, nlists, nprobe, binary):
     if doc_embeddings.ndim != 2 or doc_embeddings.shape[1] == 0:
         raise ValueError("Document embeddings must have at least one dimension.")
 
-    index = faiss.IndexFlatIP(doc_embeddings.shape[1])
-    index.add(np.ascontiguousarray(doc_embeddings, dtype=np.float32))
+    if binary:
+        vectors = np.ascontiguousarray(doc_embeddings, dtype=np.bool)
+        vectors = np.packbits(vectors, axis=1)
+    else:
+        vectors = np.ascontiguousarray(doc_embeddings, dtype=np.float32)
+
+    if index_type == "IP":
+        if binary:
+            index = faiss.IndexBinaryFlat(doc_embeddings.shape[1])
+        else:
+            index = faiss.IndexFlatIP(doc_embeddings.shape[1])
+    elif index_type == "HNSW":
+        if binary:
+            index = faiss.IndexBinaryHNSW(doc_embeddings.shape[1], M)
+        else:
+            index = faiss.IndexHNSWFlat(doc_embeddings.shape[1], M)
+    elif index_type == "IVF":
+        if binary:
+            quantizer = faiss.IndexBinaryFlat(doc_embeddings.shape[1])
+            index = faiss.IndexBinaryIVF(quantizer, doc_embeddings.shape[1], nlists)
+        else:
+            quantizer = faiss.IndexFlatIP(doc_embeddings.shape[1])
+            index = faiss.IndexIVFFlat(quantizer, doc_embeddings.shape[1], nlists, faiss.METRIC_INNER_PRODUCT)
+        index.cp.spherical = True # results in cosine similarity as distance metric if vectors are normalized
+        index.nprobe = nprobe
+        index.train(vectors)
+    else:
+        raise ValueError(f"Couldn't create index of type {index_type!r}. Aborting!")
+
+    index.add(vectors)
     return index
 
 
-def retrieve(index, query_ids, query_embeddings, doc_ids, k):
+def retrieve(index, query_ids, query_embeddings, doc_ids, k, index_type, binary):
     if k < 1:
         raise ValueError("k must be at least 1.")
     if index.ntotal != len(doc_ids):
@@ -49,15 +77,21 @@ def retrieve(index, query_ids, query_embeddings, doc_ids, k):
     if not doc_ids:
         return [[] for _ in query_ids]
 
+    if binary:
+        vectors = np.ascontiguousarray(query_embeddings, dtype=np.bool)
+        vectors = np.packbits(vectors, axis=1)
+    else:
+        vectors = np.ascontiguousarray(query_embeddings, dtype=np.float32)
+
     scores, indices = index.search(
-        np.ascontiguousarray(query_embeddings, dtype=np.float32),
+        vectors,
         min(k, len(doc_ids)),
     )
     results = []
     for query_id, query_scores, query_indices in zip(query_ids, scores, indices):
         ranking = []
         for score, doc_index in zip(query_scores, query_indices):
-            if doc_index < 0 or score <= 0:
+            if doc_index < 0 or (index_type in ["IP", "IVF"] and not binary and score <= 0):
                 continue
             ranking.append((query_id, float(score), doc_ids[doc_index]))
         results.append(ranking)
@@ -66,7 +100,12 @@ def retrieve(index, query_ids, query_embeddings, doc_ids, k):
 
 @retrieve_command()
 @click.option("--batch-size", type=click.IntRange(min=1), default=128, show_default=True)
-def main(dataset, embedding, output, k, batch_size):
+@click.option("--index-type", type=click.Choice(["IP", "HNSW", "IVF"]), default="IP", show_default=True)
+@click.option("--M", type=click.IntRange(min=1), default=32, show_default=True)
+@click.option("--nlists", type=click.IntRange(min=1), default=100, show_default=True)
+@click.option("--nprobe", type=click.IntRange(min=1), default=1, show_default=True)
+@click.option("--binary", type=bool, is_flag=True, default=False, show_default=True)
+def main(dataset, embedding, output, k, batch_size, index_type, m, nlists, nprobe, binary):
     output.mkdir(parents=True, exist_ok=True)
     lsr_benchmark.register_to_ir_datasets(dataset)
     register_metadata(
@@ -88,7 +127,7 @@ def main(dataset, embedding, output, k, batch_size):
         export_file_path=output / "index-metadata.yml",
         export_format=ExportFormat.IR_METADATA,
     ):
-        index = build_index(doc_embeddings)
+        index = build_index(doc_embeddings, index_type, m, nlists, nprobe, binary)
 
     with tracking(
         export_file_path=output / "retrieval-metadata.yml",
@@ -104,6 +143,8 @@ def main(dataset, embedding, output, k, batch_size):
                     query_embeddings[start:end],
                     doc_ids,
                     k,
+                    index_type,
+                    binary,
                 )
             )
 
