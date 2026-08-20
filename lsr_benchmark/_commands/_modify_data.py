@@ -347,7 +347,9 @@ def perform_quantization(
 
 
 @click.argument(
-    "datasets", type=click.Choice(list(JOINT_TO_DATASETS.keys()) + list(all_datasets()) + ["all"]), nargs=-1
+    "datasets",
+    type=click.Choice(list(JOINT_TO_DATASETS.keys()) + list(all_datasets()) + ["all", "all-joint"]),
+    nargs=-1,
 )
 @click.option(
     "--embedding",
@@ -394,6 +396,8 @@ def modify_data(
 
     if "all" in datasets:
         datasets = list(JOINT_TO_DATASETS.keys()) + list(all_datasets())
+    elif "all-joint" in datasets:
+        datasets = list(JOINT_TO_DATASETS.keys())
     if "all" in embedding:
         embedding = all_embeddings() + list(all_dense_embeddings())
     if "all" in quantization:
