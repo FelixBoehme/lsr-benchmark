@@ -1,4 +1,4 @@
 lsr-benchmark
-tirex-tracker
+tirex-tracker>=0.2.24
 click
 duckdb
