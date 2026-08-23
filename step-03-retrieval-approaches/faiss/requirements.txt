@@ -1,3 +1,4 @@
 faiss-cpu
 lsr-benchmark
 numpy
+tirex-tracker>=0.2.24
