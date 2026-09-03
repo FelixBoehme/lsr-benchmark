@@ -1,46 +1,62 @@
 #!/usr/bin/env python3
-import lsr_benchmark
-import click
-from tirex_tracker import tracking, ExportFormat, register_metadata
-from tqdm import tqdm
-import pyterrier as pt
+import gzip
+from pathlib import Path
 from shutil import rmtree
-import pandas as pd
-from tira.third_party_integrations import ensure_pyterrier_is_loaded,  normalize_run
+
+import click
 import ir_datasets
-from lsr_benchmark.click import  option_lsr_dataset, option_retrieval_depth
+import pandas as pd
+import pyterrier as pt
+from tira.third_party_integrations import ensure_pyterrier_is_loaded
+from tirex_tracker import ExportFormat, register_metadata, tracking
+
+import lsr_benchmark
+from lsr_benchmark.click import option_lsr_dataset, option_retrieval_depth
+
 
 @click.command()
 @option_lsr_dataset()
 @option_retrieval_depth()
-@click.option("--retrieval", type=str, required=False, default="BM25", help="The retrieval model to use.")
-def main(dataset, output, retrieval, k):
+@click.option(
+    "--index",
+    type=click.Path(exists=True, resolve_path=True, path_type=Path),
+    required=True,
+    help="The path of the index to use.",
+)
+@click.option(
+    "--retrieval",
+    type=click.Choice(["BM25", "DPH", "PL2", "DIRICHLET_LM", "HIEMSTRA_LM", "TF", "TF_IDF"]),
+    required=False,
+    default="BM25",
+    help="The retrieval model to use.",
+)
+def main(dataset, output, index, retrieval, k):
     output.mkdir(parents=True, exist_ok=True)
     lsr_benchmark.register_to_ir_datasets(dataset)
     ir_dataset = ir_datasets.load(f"lsr-benchmark/{dataset}")
     ensure_pyterrier_is_loaded(boot_packages=())
 
     register_metadata({"actor": {"team": "reneuir-baselines"}, "tag": f"pyterrier-naive-{retrieval.lower()}-top-{k}"})
-    documents = [{"docno": i.doc_id, "text": i.default_text()} for i in ir_dataset.docs_iter()]
 
     with tracking(export_file_path=output / "index-metadata.yml", export_format=ExportFormat.IR_METADATA):
-        index = pt.IterDictIndexer("ignored", meta= {'docno' : 100}, type=pt.IndexingType.MEMORY).index(tqdm(documents, "Index docs"))
+        index = pt.terrier.TerrierIndex(index / "doc" / "doc-index")
 
     rmtree(output / ".tirex-tracker")
     queries = []
-    tokeniser = pt.autoclass("org.terrier.indexing.tokenisation.Tokeniser").getTokeniser()
-
-    def pt_tokenize(text):
-        return ' '.join(tokeniser.getTokens(text))
 
     for i in ir_dataset.queries_iter():
-        queries.extend([{"qid": i.query_id, "query": pt_tokenize(i.default_text())}])
+        queries.extend([{"qid": i.query_id, "query": i.default_text()}])
 
-    pipeline = pt.terrier.Retriever(index, wmodel=retrieval)
+    pipeline = pt.terrier.Retriever(index, wmodel=retrieval, num_results=k)
     with tracking(export_file_path=output / "retrieval-metadata.yml", export_format=ExportFormat.IR_METADATA):
         run = pipeline(pd.DataFrame(queries))
 
-    pt.io.write_results(normalize_run(run, retrieval, k), f'{output}/run.txt')
+    rmtree(output / ".tirex-tracker")
+    run["rank"] += 1
+    with gzip.open(output / "run.txt.gz", "wt") as f:
+        for qid, _, docid, docno, rank, score in run.itertuples(index=False):
+            f.write(f"{qid} Q0 {docno} {rank} {score} {retrieval}\n")
+
 
 if __name__ == "__main__":
     main()
