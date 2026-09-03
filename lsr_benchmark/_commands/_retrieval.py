@@ -47,6 +47,8 @@ def run_retrieval_engine(
     if isinstance(dataset_id, Path):
         dataset_path = dataset_id.resolve()
         dataset_id = dataset_id.stem
+    elif "pyterrier-naive" in docker_image:
+        dataset_path = tira.download_dataset("lsr-benchmark", dataset_id)
     else:
         dataset_path = temporary_directory()
 
@@ -242,6 +244,9 @@ def validate_retrieval_selection(approaches, datasets, embeddings, print_message
         if not values:
             print_message(message, FormatMsgType.ERROR)
             return False
+    if "lexical" in embeddings and any(a != "pyterrier-naive" for a in approaches):
+        print_message("Lexical PyTerrier Indeces can only be used with lexical retrieval.")
+        return False
     return True
 
 
@@ -412,7 +417,7 @@ def report_retrieval_stats(stats, print_message):
 )
 @click.option(
     "--embedding",
-    type=ChoiceOrPath(["all", "none", ] + all_embeddings() + list(all_dense_embeddings())),
+    type=ChoiceOrPath(["all", "none", "lexical"] + all_embeddings() + list(all_dense_embeddings())),
     multiple=True,
     help="The datasets to run on.",
 )
