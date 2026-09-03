@@ -4,11 +4,14 @@ This directory contains the embedding engines that we currently have in the lsr_
 
 Please run `lsr-benchmark overview` for an up-to-date overview over all datasets and all embeddings.
 
-Currently, we have 3 embedding engines (produce more embeddings, as one engine often can handle different models) that can run lsr embeddings:
+Currently, we have 6 embedding engines (produce more embeddings, as one engine often can handle different models) that can run lsr embeddings:
 
 - [bge-m3](bge-m3)
 - [lexical](lexical)
+- [lexical-index](lexical-index)
 - [lightning-ir](lightning-ir)
+- [mteb](mteb)
+- [sentence-transformers](sentence-transformers)
 
 ## Remaining Embedding Engines
 
