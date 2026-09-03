@@ -90,7 +90,7 @@ def overview():
     overall_datasets = len(overview)
     overall_embeddings = set()
     def f(s):
-        return str(int(s/(1024))) + " MB"
+        return f"{s/1024:.1f} MB"
 
     import pandas as pd
     model_to_size = {}
@@ -104,7 +104,7 @@ def overview():
             overall_embeddings.add(embedding)
             model_to_size[embedding] = int(embedding_size) + model_to_size.get(embedding, 0)
 
-        df_dataset += [{"Dataset": TIRA_DATASET_ID_TO_IR_DATASET_ID.get(dataset_id, dataset_id), "Text": f(int(stats['dataset-size'])), "Avg. Embeddings": f(embeddings_for_dataset/len(overall_embeddings))}]
+        df_dataset += [{"Dataset": TIRA_DATASET_ID_TO_IR_DATASET_ID.get(dataset_id, dataset_id), "Text": f(int(stats['dataset-size'])), "Avg. Embeddings": f(embeddings_for_dataset/len(overall_embeddings)), "Sum Embeddings": f(embeddings_for_dataset)}]
     df_dataset = pd.DataFrame(df_dataset)
     df_dataset.index = ['']*len(df_dataset)
 
