@@ -1,4 +1,4 @@
-tirex-tracker>=0.2.16
+tirex-tracker>=0.2.24
 lsr-benchmark
 tira>=0.0.180
 pyseismic-lsr

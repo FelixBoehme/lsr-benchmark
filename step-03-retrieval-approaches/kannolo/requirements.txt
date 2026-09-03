@@ -1,5 +1,5 @@
-git+https://github.com/reneuir/lsr-benchmark.git
-tirex-tracker>=0.2.16
+lsr-benchmark
+tirex-tracker>=0.2.24
 tira>=0.0.180
 kannolo
 click

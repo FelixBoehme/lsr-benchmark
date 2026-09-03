@@ -1,4 +1,4 @@
 # BMP is built from a pinned, patched source revision in the containers.
 lsr-benchmark
-tirex-tracker
+tirex-tracker>=0.2.24
 click
