@@ -11,7 +11,7 @@ tira-cli code-submission \
     --task lsr-benchmark \
     --tira-vm-id reneuir-baselines \
     --dataset tiny-example-20251002_0-training \
-    --command '/run-pyterrier.py --dataset $inputDataset --output $outputDir --retrieval BM25' \
+    --command '/run-pyterrier.py --dataset $inputDataset --output $outputDir --index $embeddings --retrieval BM25' \
     --dry-run
 ```
 
@@ -24,9 +24,5 @@ If you want to run it locally, please install the dependencies via `pip3 install
 To make predictions on a dataset, run:
 
 ```
-./run-pyterrier.py --dataset clueweb09/en/trec-web-2009 --retrieval BM25 --output output-dir
+./run-pyterrier.py --dataset clueweb09/en/trec-web-2009 --index /path/to/index --retrieval BM25 --output output-dir
 ```
-
-cat /sys/class/powercap/intel-rapl/*/energy_uj
-
-rm -Rf ~/.tira; mkdir ~/.tira; echo '{"archive_base_url": "https://127.0.0.1:8080/", "base_url": "https://127.0.0.1:8080/", "base_url_api": "https://127.0.0.1:8080/", "verify": 0}' > ~/.tira/.tira-settings.json
