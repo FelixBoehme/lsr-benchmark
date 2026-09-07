@@ -65,7 +65,6 @@ def test_native_sparse_retrieval_returns_inner_product_top_k(
             index,
             [("q1", ["0"], [1.0])],
             k=2,
-            batch_size=1,
             drop_ratio_search=0.0,
         )
     )
@@ -88,7 +87,6 @@ def test_retrieval_handles_multiple_queries_and_k_larger_than_corpus(milvus_clie
                 ("q2", ["1"], [1.0]),
             ],
             k=10,
-            batch_size=2,
             drop_ratio_search=0.0,
         )
     )
@@ -162,7 +160,6 @@ def test_retrieval_filters_invalid_and_non_positive_results():
             index,
             [("q1", ["0"], [1.0])],
             k=3,
-            batch_size=1,
             drop_ratio_search=0.0,
         )
     )
@@ -183,7 +180,6 @@ def test_retrieval_rejects_inconsistent_index_metadata():
                 index,
                 [("q1", ["0"], [1.0])],
                 k=1,
-                batch_size=1,
                 drop_ratio_search=0.0,
             )
         )
@@ -222,7 +218,6 @@ def test_main_writes_a_compressed_trec_run(monkeypatch, tmp_path, milvus_client)
         k=10,
         algorithm="DAAT_MAXSCORE",
         index_batch_size=2,
-        query_batch_size=2,
         drop_ratio_build=0.0,
         drop_ratio_search=0.0,
     )

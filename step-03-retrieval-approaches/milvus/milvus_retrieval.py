@@ -7,7 +7,6 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from itertools import islice
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -58,14 +57,6 @@ def to_sparse_vector(tokens, values):
         merged[index] += numeric_value
 
     return {index: value for index, value in sorted(merged.items()) if value != 0}
-
-
-def batched(items, batch_size):
-    if batch_size < 1:
-        raise ValueError("Batch size must be at least 1.")
-    iterator = iter(items)
-    while batch := list(islice(iterator, batch_size)):
-        yield batch
 
 
 def wait_for_index(client, collection_name, index_name, timeout=300):
@@ -193,11 +184,9 @@ def build_index(
     )
 
 
-def retrieve(client, index, query_embeddings, k, batch_size, drop_ratio_search):
+def retrieve(client, index, query_embeddings, k, drop_ratio_search):
     if k < 1:
         raise ValueError("k must be at least 1.")
-    if batch_size < 1:
-        raise ValueError("Batch size must be at least 1.")
     if not 0 <= drop_ratio_search < 1:
         raise ValueError("Search drop ratio must be at least 0 and less than 1.")
 
@@ -214,23 +203,14 @@ def retrieve(client, index, query_embeddings, k, batch_size, drop_ratio_search):
         raise ValueError("Milvus index metadata is inconsistent with the configured index.")
 
     depth = min(k, index.indexed_document_count)
-    for query_batch in batched(query_embeddings, batch_size):
-        rankings = [[] for _ in query_batch]
-        vectors = []
-        vector_positions = []
+    for query_id, tokens, values in query_embeddings:
+        ranking = []
+        vector = to_sparse_vector(tokens, values) if depth else {}
 
-        if depth:
-            for position, (_, tokens, values) in enumerate(query_batch):
-                vector = to_sparse_vector(tokens, values)
-                if not vector:
-                    continue
-                vectors.append(vector)
-                vector_positions.append(position)
-
-        if vectors:
+        if vector:
             responses = client.search(
                 index.collection_name,
-                data=vectors,
+                data=[vector],
                 anns_field=SPARSE_VECTOR_FIELD,
                 limit=depth,
                 output_fields=[DOCUMENT_ID_FIELD],
@@ -239,22 +219,19 @@ def retrieve(client, index, query_embeddings, k, batch_size, drop_ratio_search):
                     "params": {"drop_ratio_search": drop_ratio_search},
                 },
             )
-            for position, response in zip(vector_positions, responses):
-                ranking = []
-                for hit in response:
-                    document_id = hit.get("entity", {}).get(DOCUMENT_ID_FIELD)
-                    score = float(hit["distance"])
-                    if document_id is None or score <= 0:
-                        continue
-                    ranking.append((str(document_id), score))
-                rankings[position] = sorted(
-                    ranking,
-                    key=lambda result: result[1],
-                    reverse=True,
-                )[:depth]
+            for hit in responses[0]:
+                document_id = hit.get("entity", {}).get(DOCUMENT_ID_FIELD)
+                score = float(hit["distance"])
+                if document_id is None or score <= 0:
+                    continue
+                ranking.append((str(document_id), score))
+            ranking = sorted(
+                ranking,
+                key=lambda result: result[1],
+                reverse=True,
+            )[:depth]
 
-        for (query_id, _, _), ranking in zip(query_batch, rankings):
-            yield str(query_id), ranking
+        yield str(query_id), ranking
 
 
 def read_server_log(log_path):
@@ -360,13 +337,6 @@ def milvus_server(storage_path, startup_timeout=180):
     help="Number of documents sent to Milvus per insert.",
 )
 @click.option(
-    "--query-batch-size",
-    type=click.IntRange(min=1),
-    default=128,
-    show_default=True,
-    help="Number of queries sent to Milvus per search request.",
-)
-@click.option(
     "--drop-ratio-build",
     type=click.FloatRange(min=0, max=1, max_open=True),
     default=0.0,
@@ -387,7 +357,6 @@ def main(
     k,
     algorithm,
     index_batch_size,
-    query_batch_size,
     drop_ratio_build,
     drop_ratio_search,
 ):
@@ -399,7 +368,7 @@ def main(
             "actor": {"team": "reneuir-baselines"},
             "tag": (
                 f"milvus-{embedding.replace('/', '-')}-{algorithm}-"
-                f"{index_batch_size}-{query_batch_size}-{drop_ratio_build}-"
+                f"{index_batch_size}-{drop_ratio_build}-"
                 f"{drop_ratio_search}-{k}"
             ),
         }
@@ -432,7 +401,6 @@ def main(
                         index,
                         query_embeddings,
                         k,
-                        query_batch_size,
                         drop_ratio_search,
                     )
                 )

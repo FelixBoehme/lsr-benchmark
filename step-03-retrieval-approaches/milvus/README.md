@@ -38,10 +38,10 @@ python3 milvus_retrieval.py \
 ```
 
 `--algorithm` selects `DAAT_MAXSCORE`, `DAAT_WAND`, or `TAAT_NAIVE`.
-`--index-batch-size` and `--query-batch-size` control ingestion and search
-batching. `--drop-ratio-build` and `--drop-ratio-search` can prune low-weight
-document and query dimensions; both default to `0`, which preserves exact
-inner-product scoring.
+`--index-batch-size` controls document ingestion batching; queries are
+retrieved sequentially, one at a time. `--drop-ratio-build` and
+`--drop-ratio-search` can prune low-weight document and query dimensions;
+both default to `0`, which preserves exact inner-product scoring.
 
 ## Submission
 
