@@ -61,7 +61,6 @@ def test_native_sparse_retrieval_returns_inner_product_top_k(qdrant_client):
             index,
             [("q1", ["0"], [1.0])],
             k=2,
-            batch_size=1,
         )
     )
 
@@ -83,7 +82,6 @@ def test_retrieval_handles_multiple_queries_and_k_larger_than_corpus(qdrant_clie
                 ("q2", ["1"], [1.0]),
             ],
             k=10,
-            batch_size=2,
         )
     )
 
@@ -112,17 +110,15 @@ def test_retrieval_filters_invalid_and_non_positive_results():
         def get_collection(self, collection_name):
             return SimpleNamespace(points_count=3)
 
-        def query_batch_points(self, collection_name, requests):
-            return [
-                SimpleNamespace(
-                    points=[
-                        SimpleNamespace(payload={"doc_id": "lower"}, score=0.5),
-                        SimpleNamespace(payload=None, score=2.0),
-                        SimpleNamespace(payload={"doc_id": "negative"}, score=-1.0),
-                        SimpleNamespace(payload={"doc_id": "higher"}, score=1.0),
-                    ]
-                )
-            ]
+        def query_points(self, collection_name, **kwargs):
+            return SimpleNamespace(
+                points=[
+                    SimpleNamespace(payload={"doc_id": "lower"}, score=0.5),
+                    SimpleNamespace(payload=None, score=2.0),
+                    SimpleNamespace(payload={"doc_id": "negative"}, score=-1.0),
+                    SimpleNamespace(payload={"doc_id": "higher"}, score=1.0),
+                ]
+            )
 
     index = qdrant_retrieval.QdrantIndex("test", 3, 3)
     results = list(
@@ -131,7 +127,6 @@ def test_retrieval_filters_invalid_and_non_positive_results():
             index,
             [("q1", ["0"], [1.0])],
             k=3,
-            batch_size=1,
         )
     )
 
@@ -151,7 +146,6 @@ def test_retrieval_rejects_inconsistent_index_metadata():
                 index,
                 [("q1", ["0"], [1.0])],
                 k=1,
-                batch_size=1,
             )
         )
 
@@ -188,7 +182,6 @@ def test_main_writes_a_compressed_trec_run(monkeypatch, tmp_path, qdrant_client)
         output=tmp_path,
         k=10,
         index_batch_size=2,
-        query_batch_size=2,
         on_disk=False,
     )
 

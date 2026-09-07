@@ -7,8 +7,8 @@ numeric internal point IDs while their original benchmark IDs are preserved in
 the payload.
 
 The command starts an isolated Qdrant server for each run, builds a temporary
-collection, executes exact batched sparse queries, and removes the collection
-storage when the run finishes.
+collection, executes exact sequential sparse queries, and removes the
+collection storage when the run finishes.
 
 ## Development
 
@@ -38,10 +38,10 @@ python qdrant_retrieval.py \
     --k 1000
 ```
 
-`--index-batch-size` controls the number of documents per upsert and
-`--query-batch-size` controls the number of searches per batch request. The
-sparse index is held in memory by default; use `--on-disk` to store it on disk.
-Both modes use float32 weights, no IDF modifier, and exact search.
+`--index-batch-size` controls the number of documents per upsert; queries are
+retrieved sequentially, one at a time. The sparse index is held in memory by
+default; use `--on-disk` to store it on disk. Both modes use float32 weights,
+no IDF modifier, and exact search.
 
 ## Submission
 

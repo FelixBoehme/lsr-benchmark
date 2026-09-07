@@ -8,7 +8,6 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from itertools import islice
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -58,14 +57,6 @@ def to_sparse_vector(tokens, values):
         indices=[index for index, _ in entries],
         values=[value for _, value in entries],
     )
-
-
-def batched(items, batch_size):
-    if batch_size < 1:
-        raise ValueError("Batch size must be at least 1.")
-    iterator = iter(items)
-    while batch := list(islice(iterator, batch_size)):
-        yield batch
 
 
 def wait_for_collection(client, collection_name, timeout=300):
@@ -147,11 +138,9 @@ def build_index(
     return QdrantIndex(collection_name, document_count, indexed_document_count)
 
 
-def retrieve(client, index, query_embeddings, k, batch_size):
+def retrieve(client, index, query_embeddings, k):
     if k < 1:
         raise ValueError("k must be at least 1.")
-    if batch_size < 1:
-        raise ValueError("Batch size must be at least 1.")
 
     collection = client.get_collection(index.collection_name)
     if collection.points_count != index.indexed_document_count:
@@ -160,45 +149,32 @@ def retrieve(client, index, query_embeddings, k, batch_size):
         )
 
     depth = min(k, index.indexed_document_count)
-    for query_batch in batched(query_embeddings, batch_size):
-        rankings = [[] for _ in query_batch]
-        requests = []
-        request_positions = []
+    for query_id, tokens, values in query_embeddings:
+        ranking = []
+        vector = to_sparse_vector(tokens, values) if depth else None
 
-        if depth:
-            for position, (_, tokens, values) in enumerate(query_batch):
-                vector = to_sparse_vector(tokens, values)
-                if not vector.indices:
+        if vector is not None and vector.indices:
+            response = client.query_points(
+                index.collection_name,
+                query=vector,
+                using=SPARSE_VECTOR_NAME,
+                search_params=models.SearchParams(exact=True),
+                limit=depth,
+                with_payload=["doc_id"],
+            )
+            for point in response.points:
+                document_id = (point.payload or {}).get("doc_id")
+                score = float(point.score)
+                if document_id is None or score <= 0:
                     continue
-                requests.append(
-                    models.QueryRequest(
-                        query=vector,
-                        using=SPARSE_VECTOR_NAME,
-                        params=models.SearchParams(exact=True),
-                        limit=depth,
-                        with_payload=["doc_id"],
-                    )
-                )
-                request_positions.append(position)
+                ranking.append((str(document_id), score))
+            ranking = sorted(
+                ranking,
+                key=lambda result: result[1],
+                reverse=True,
+            )[:depth]
 
-        if requests:
-            responses = client.query_batch_points(index.collection_name, requests)
-            for position, response in zip(request_positions, responses):
-                ranking = []
-                for point in response.points:
-                    document_id = (point.payload or {}).get("doc_id")
-                    score = float(point.score)
-                    if document_id is None or score <= 0:
-                        continue
-                    ranking.append((str(document_id), score))
-                rankings[position] = sorted(
-                    ranking,
-                    key=lambda result: result[1],
-                    reverse=True,
-                )[:depth]
-
-        for (query_id, _, _), ranking in zip(query_batch, rankings):
-            yield str(query_id), ranking
+        yield str(query_id), ranking
 
 
 def available_ports(count):
@@ -287,13 +263,6 @@ def qdrant_server(storage_path, startup_timeout=30):
     help="Number of documents sent to Qdrant per upsert.",
 )
 @click.option(
-    "--query-batch-size",
-    type=click.IntRange(min=1),
-    default=128,
-    show_default=True,
-    help="Number of queries sent to Qdrant per batch request.",
-)
-@click.option(
     "--on-disk/--in-memory",
     default=False,
     show_default=True,
@@ -305,7 +274,6 @@ def main(
     output,
     k,
     index_batch_size,
-    query_batch_size,
     on_disk,
 ):
     output.mkdir(parents=True, exist_ok=True)
@@ -315,7 +283,7 @@ def main(
             "actor": {"team": "reneuir-baselines"},
             "tag": (
                 f"qdrant-{embedding.replace('/', '-')}-{index_batch_size}-"
-                f"{query_batch_size}-{on_disk}-{k}"
+                f"{on_disk}-{k}"
             ),
         }
     )
@@ -346,7 +314,6 @@ def main(
                         index,
                         query_embeddings,
                         k,
-                        query_batch_size,
                     )
                 )
 
