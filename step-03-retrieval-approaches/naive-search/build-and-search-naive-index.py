@@ -11,7 +11,7 @@ import gzip
 
 
 @retrieve_command()
-@click.option("--use-u32", type=bool, required=False, default=False, help="Whether to use u32 for component ids, required for datasets with many components..")
+@click.option("--use-u32", type=bool, required=False, default=True, help="Whether to use u32 for component ids, required for datasets with many components..")
 def main(dataset, embedding, output, k, use_u32):
     output.mkdir(parents=True, exist_ok=True)
     lsr_benchmark.register_to_ir_datasets(dataset)
