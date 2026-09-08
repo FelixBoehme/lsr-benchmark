@@ -21,17 +21,10 @@ def main(dataset, output):
 
     register_metadata({"actor": {"team": "reneuir-baselines"}, "tag": "pyterrier-lexical-index"})
     documents = [{"docno": i.doc_id, "text": i.default_text()} for i in ir_dataset.docs_iter()]
-    # queries = [{"docno": i.query_id, "text": i.default_text()} for i in ir_dataset.queries_iter()]
 
-    doc_save_dir = output / "doc"
-    with tracking(export_file_path=doc_save_dir / "doc-ir-metadata.yml", export_format=ExportFormat.IR_METADATA):
-        (doc_save_dir / "doc-ids.txt").write_text("\n".join([doc["docno"] for doc in documents]))
-        indexer = pt.IterDictIndexer(str((doc_save_dir / "doc-index").resolve()), meta={"docno": 100})
+    with tracking(export_file_path=output / "doc-ir-metadata.yml", export_format=ExportFormat.IR_METADATA):
+        indexer = pt.IterDictIndexer(str((output / "doc-index").resolve()), meta={"docno": 100})
         indexer.index(tqdm(documents, "Index docs"))
-
-    # query_save_dir = output / "query"
-    # with tracking(export_file_path=query_save_dir / "query-ir-metadata.yml", export_format=ExportFormat.IR_METADATA):
-    #     (query_save_dir / "query-ids.txt").write_text("\n".join([query["docno"] for query in queries]))
 
 
 if __name__ == "__main__":
