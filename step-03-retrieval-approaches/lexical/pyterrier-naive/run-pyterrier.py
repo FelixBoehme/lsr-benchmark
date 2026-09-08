@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import gzip
+import shutil
 from pathlib import Path
-from shutil import rmtree
 
 import click
 import ir_datasets
@@ -16,7 +16,7 @@ from lsr_benchmark.click import option_lsr_dataset, option_retrieval_depth
 
 
 def find_index_path(path: Path) -> Path | None:
-    index_path = path / "doc" / "doc-index"
+    index_path = path / "doc-index"
     if index_path.exists():
         return index_path
 
@@ -77,7 +77,7 @@ def joined_documents(index_paths: list[Path], behaviour: DuplicateBehaviour):
             yield doc
 
         del source_index
-        rmtree(index_path.parent.parent)
+        shutil.rmtree(index_path.parent)
 
 
 def load_index(index_path: Path, dataset: str):
@@ -85,7 +85,7 @@ def load_index(index_path: Path, dataset: str):
     if len(index_paths) == 1:
         return pt.terrier.TerrierIndex(index_paths[0])
 
-    joined_index_path = index_path / "doc" / "doc-index"
+    joined_index_path = index_path / "doc-index"
     joined_index_path.parent.mkdir(parents=True, exist_ok=True)
     index = pt.terrier.TerrierIndex(joined_index_path)
     behaviour = JOINT_TO_DATASETS[dataset_id(dataset)]["settings"].doc
@@ -96,11 +96,20 @@ def load_index(index_path: Path, dataset: str):
     return index
 
 
+def write_index_metadata(index_path: Path, out_path: Path) -> None:
+    if (index_path / "doc-index").is_dir():
+        shutil.copy(index_path / "doc-ir-metadata.yml", out_path / "index-metadata.yml")
+    else:
+        # TODO: decide on how to merge the multiple metadata files
+        pass
+
+
 @click.command()
 @option_lsr_dataset()
 @option_retrieval_depth()
 @click.option(
     "--index",
+    "index_path",
     type=click.Path(exists=True, resolve_path=True, path_type=Path),
     required=True,
     help="The path of the index to use.",
@@ -112,7 +121,7 @@ def load_index(index_path: Path, dataset: str):
     default="BM25",
     help="The retrieval model to use.",
 )
-def main(dataset, output, index, retrieval, k):
+def main(dataset, output, index_path, retrieval, k):
     output.mkdir(parents=True, exist_ok=True)
     lsr_benchmark.register_to_ir_datasets(dataset)
     ir_dataset = ir_datasets.load(f"lsr-benchmark/{dataset}")
@@ -120,12 +129,10 @@ def main(dataset, output, index, retrieval, k):
 
     register_metadata({"actor": {"team": "reneuir-baselines"}, "tag": f"pyterrier-naive-{retrieval.lower()}-top-{k}"})
 
-    with tracking(export_file_path=output / "index-metadata.yml", export_format=ExportFormat.IR_METADATA):
-        index = load_index(index, dataset)
+    write_index_metadata(index_path, output)
+    index = load_index(index_path, dataset)
 
-    rmtree(output / ".tirex-tracker")
     queries = []
-
     for i in ir_dataset.queries_iter():
         queries.extend([{"qid": i.query_id, "query": i.default_text()}])
 
@@ -137,7 +144,7 @@ def main(dataset, output, index, retrieval, k):
     with tracking(export_file_path=output / "retrieval-metadata.yml", export_format=ExportFormat.IR_METADATA):
         run = pipeline(pd.DataFrame(queries))
 
-    rmtree(output / ".tirex-tracker")
+    shutil.rmtree(output / ".tirex-tracker")
     run["rank"] += 1
     with gzip.open(output / "run.txt.gz", "wt") as f:
         for qid, _, docid, docno, rank, score in run.itertuples(index=False):
