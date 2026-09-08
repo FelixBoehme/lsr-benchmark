@@ -355,7 +355,6 @@ def perform_quantization(
 @click.option(
     "--embedding",
     type=click.Choice(all_embeddings() + list(all_dense_embeddings()) + ["all"]),
-    required=True,
     multiple=True,
     help="The embeddings to run on",
 )
