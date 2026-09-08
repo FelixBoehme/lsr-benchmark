@@ -44,11 +44,14 @@ def run_retrieval_engine(
     if output_dir is not None and Path(output_dir).exists():
         return
     tira = Client()
+
+    temporary_dset_path = False
     if isinstance(dataset_id, Path):
         dataset_path = dataset_id.resolve()
         dataset_id = dataset_id.stem
     else:
         dataset_path = temporary_directory()
+        temporary_dset_path = True
 
     embeddings_dir = download_embeddings(embedding, dataset_id, tira)
 
@@ -94,6 +97,9 @@ def run_retrieval_engine(
                 meta["data"]["test collection"]["union of subsamples"] = JOINT_TO_DATASETS[dataset_id]["datasets"]
                 with open(output_dir / meta_file, "w") as f:
                     yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
+
+    if temporary_dset_path:
+        shutil.rmtree(dataset_path)
 
     return tag
 
