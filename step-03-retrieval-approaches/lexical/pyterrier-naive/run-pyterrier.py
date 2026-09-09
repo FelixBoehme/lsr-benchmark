@@ -7,6 +7,7 @@ import click
 import ir_datasets
 import pandas as pd
 import pyterrier as pt
+import yaml
 from tira.third_party_integrations import ensure_pyterrier_is_loaded
 from tirex_tracker import ExportFormat, register_metadata, tracking
 
@@ -100,8 +101,53 @@ def write_index_metadata(index_path: Path, out_path: Path) -> None:
     if (index_path / "doc-index").is_dir():
         shutil.copy(index_path / "doc-ir-metadata.yml", out_path / "index-metadata.yml")
     else:
-        # TODO: decide on how to merge the multiple metadata files
-        pass
+        metadata_paths = sorted(
+            path / "doc-ir-metadata.yml"
+            for path in index_path.iterdir()
+            if path.is_dir() and (path / "doc-ir-metadata.yml").is_file()
+        )
+        if not metadata_paths:
+            raise ValueError(f"No doc-ir-metadata.yml files found in subdirectories of '{index_path}'.")
+
+        metadata = []
+        for metadata_path in metadata_paths:
+            with metadata_path.open() as f:
+                metadata.append(yaml.safe_load(f))
+
+        resource_keys = (
+            ("cpu", "energy used system"),
+            ("gpu", "energy used system"),
+            ("ram", "energy used system"),
+            ("runtime", "wallclock"),
+        )
+        combined_metadata = {
+            "actor": metadata[0]["actor"],
+            "data": metadata[0]["data"],
+            "resources": {resource: {} for resource, _ in resource_keys},
+        }
+
+        for resource, key in resource_keys:
+            total = 0.0
+            unit = None
+            all_null = True
+            for item in metadata:
+                value, current_unit = str(item["resources"][resource][key]).split(maxsplit=1)
+                if unit is None:
+                    unit = current_unit
+                elif current_unit != unit:
+                    raise ValueError(
+                        f"Mismatching units for resources.{resource}.{key}: {unit!r} and {current_unit!r}."
+                    )
+
+                if value != "null":
+                    total += float(value)
+                    all_null = False
+
+            combined_value = "null" if all_null else f"{total:g}"
+            combined_metadata["resources"][resource][key] = f"{combined_value} {unit}"
+
+        with (out_path / "index-metadata.yml").open("w") as f:
+            yaml.safe_dump(combined_metadata, f, sort_keys=False)
 
 
 @click.command()
