@@ -23,6 +23,7 @@ jobs:
           - numpy-exhaustive
           - pyterrier-splade
           - pyterrier-splade-pisa
+          - lexical/pyterrier-naive
           - qdrant
           - seismic
           - vespa
@@ -46,6 +47,6 @@ jobs:
               --task lsr-benchmark \
               --dataset tiny-example-20251002_0-training \
               --command '/index-and-retrieve.py --dataset $inputDataset --embedding $embeddings --output $outputDir' \
-              --mount-directory '$embeddings=lsr-benchmark/lightning-ir/naver-splade-v3-doc' \
+              --mount-directory '$embeddings=${{ matrix.approach == 'lexical/pyterrier-naive' && 'lsr-benchmark/reneuir-baselines/pyterrier-lexical-index' || 'lsr-benchmark/lightning-ir/naver-splade-v3-doc' }}' \
               --platform host \
               --dry-run

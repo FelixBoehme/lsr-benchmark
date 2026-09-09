@@ -9,6 +9,8 @@ def download_embeddings(embedding: str | Path, dataset: str, tira) -> Path:
     emb_is_path = isinstance(embedding, Path)
     if emb_is_path:
         return embedding.resolve()
+    elif embedding == "lexical":
+        embeddings_dir = tira.get_run_output("lsr-benchmark/reneuir-baselines/pyterrier-lexical-index", dataset)
     elif embedding.lower() != "none" and embedding not in all_dense_embeddings():
         embeddings_dir = tira.get_run_output(f"lsr-benchmark/lightning-ir/{embedding}", dataset)
     elif embedding.lower() != "none" and embedding in set(

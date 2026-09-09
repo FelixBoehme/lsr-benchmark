@@ -29,6 +29,7 @@ import yaml
 from tira.io_utils import docker_supported_target_platform
 import os
 import itertools
+from tempfile import TemporaryDirectory
 
 
 def run_retrieval_engine(
@@ -46,14 +47,26 @@ def run_retrieval_engine(
     tira = Client()
 
     temporary_dset_path = False
+    is_lexical_index = "pyterrier-naive" in docker_image
+    is_lexical_joint_index = dataset_id  in JOINT_TO_DATASETS and is_lexical_index
+
     if isinstance(dataset_id, Path):
         dataset_path = dataset_id.resolve()
         dataset_id = dataset_id.stem
+    elif is_lexical_index:
+        dataset_path = tira.download_dataset("lsr-benchmark", dataset_id)
     else:
         dataset_path = temporary_directory()
         temporary_dset_path = True
 
-    embeddings_dir = download_embeddings(embedding, dataset_id, tira)
+    if is_lexical_joint_index:
+        tmp = TemporaryDirectory()
+        for dset in JOINT_TO_DATASETS[dataset_id]["datasets"]:
+            emb_dir = download_embeddings(embedding, dataset_id, tira)
+            shutil.copytree(emb_dir / dset, tmp)
+        embeddings_dir = Path(tmp)
+    else:
+        embeddings_dir = download_embeddings(embedding, dataset_id, tira)
 
     mount_directory = None
     if embeddings_dir:
@@ -100,6 +113,8 @@ def run_retrieval_engine(
 
     if temporary_dset_path:
         shutil.rmtree(dataset_path)
+    if is_lexical_joint_index:
+        tmp.cleanup()
 
     return tag
 
@@ -248,6 +263,9 @@ def validate_retrieval_selection(approaches, datasets, embeddings, print_message
         if not values:
             print_message(message, FormatMsgType.ERROR)
             return False
+    if "lexical" in embeddings and any(a != "pyterrier-naive" for a in approaches):
+        print_message("Lexical PyTerrier Indeces can only be used with lexical retrieval.")
+        return False
     return True
 
 
@@ -418,7 +436,7 @@ def report_retrieval_stats(stats, print_message):
 )
 @click.option(
     "--embedding",
-    type=ChoiceOrPath(["all", "none", ] + all_embeddings() + list(all_dense_embeddings())),
+    type=ChoiceOrPath(["all", "none", "lexical"] + all_embeddings() + list(all_dense_embeddings())),
     multiple=True,
     help="The datasets to run on.",
 )
