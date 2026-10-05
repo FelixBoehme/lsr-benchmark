@@ -66,6 +66,18 @@ JOINT_TO_DATASETS = {
             "trec-21-web-20251008-test",
         ],
     },
+    "trec04-msmarco": {
+        "settings": DuplicateHandling(docs=DuplicateBehaviour.SKIP),
+        "datasets": [
+            "trec-robust-2004-fold-1-20250927-test",
+            "trec-robust-2004-fold-2-20250926-test",
+            "trec-robust-2004-fold-3-20250926-test",
+            "trec-robust-2004-fold-4-20250926-test",
+            "trec-robust-2004-fold-5-20250926-test",
+            "trec-28-deep-learning-passages-20250926-training",
+            "trec-29-deep-learning-passages-20250926-training",
+        ],
+    },
 }
 
 
