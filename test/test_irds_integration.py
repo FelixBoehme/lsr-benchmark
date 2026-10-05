@@ -74,3 +74,13 @@ def test_private_joint_dataset_can_load_qrels() -> None:
         ds = lsr_load("disks45-nocr-trec-robust-2004-fold1+2+3+4+5")
         del environ["TIRA_CACHE_DIR"]
         assert len(list(ds.qrels)) > 0
+
+def test_joint_dataset_qrels_get_prefixed() -> None:
+    with TemporaryDirectory() as tmp_dir:
+        environ["TIRA_CACHE_DIR"] = str(tmp_dir)
+        register_to_ir_datasets("clueweb12-trec-web-2013+2014+clueweb12-b13-trec-misinfo-2019")
+        ds = lsr_load("clueweb12-trec-web-2013+2014+clueweb12-b13-trec-misinfo-2019")
+        del environ["TIRA_CACHE_DIR"]
+        qrel = list(ds.qrels)[0]
+        assert qrel.query_id == "d0-201"
+

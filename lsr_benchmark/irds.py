@@ -113,14 +113,14 @@ def _download_from_tira(ir_datasets_id, truth_dataset):
         out_path.mkdir(parents=True, exist_ok=True)
         seen = set()
         with open(out_path / "qrels.txt", "w") as out:
-            for ds_id in datasets:
+            for i, ds_id in enumerate(datasets):
                 for line in qrels_lines(ds_id):
                     query_id, iteration, doc_id, relevance = line.split()
 
                     if query_settings == DuplicateBehaviour.PREFIX:
-                        query_id = f"{ds_id}_{query_id}"
+                        query_id = f"d{i}-{query_id}"
                     if doc_settings == DuplicateBehaviour.PREFIX:
-                        doc_id = f"{ds_id}_{doc_id}"
+                        doc_id = f"d{i}-{doc_id}"
 
                     key = (query_id, doc_id)
                     if key in seen:

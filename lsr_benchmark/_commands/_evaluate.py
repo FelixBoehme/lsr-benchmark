@@ -18,7 +18,7 @@ from ir_measures import parse_trec_measure
 
 import lsr_benchmark
 from lsr_benchmark.datasets import TIRA_DATASET_ID_TO_IR_DATASET_ID, all_embeddings
-from lsr_benchmark._commands._modify_data import JOINT_TO_DATASETS
+from lsr_benchmark._commands._modify_data import JOINT_TO_DATASETS, DuplicateBehaviour
 
 if TYPE_CHECKING:
     from typing import _KT, _T, _VT, Any, Callable, Literal, Optional, Union
@@ -252,7 +252,11 @@ def evaluate_approach(approach: str, measure: list[str], per_query: bool):
             dsets = []
             is_joint = dataset in JOINT_TO_DATASETS
             if is_joint:
-                for ds_id in JOINT_TO_DATASETS[dataset]["datasets"]:
+                joint = JOINT_TO_DATASETS[dataset]
+                joint_datasets = joint["datasets"]
+                query_settings = joint["settings"].query
+
+                for ds_id in joint_datasets:
                     ds_ids.append(ds_id)
                     lsr_benchmark.register_to_ir_datasets(ds_id)
                     dsets.append(lsr_benchmark.load(ds_id))
@@ -264,8 +268,10 @@ def evaluate_approach(approach: str, measure: list[str], per_query: bool):
             micro = Counter()
             num_datasets = len(ds_ids)
             query_counts = Counter()
-            for ds_id, ds in zip(ds_ids, dsets):
+            for i, (ds_id, ds) in enumerate(zip(ds_ids, dsets)):
                 ret[ds_id] = {str(m): dict() for m in irmeasures}
+                if is_joint and query_settings == DuplicateBehaviour.PREFIX:
+                    ds.qrels = [qrel._replace(query_id=f"d{i}-{qrel.query_id}") for qrel in ds.qrels]
                 calc_results = ir_measures.calc(irmeasures, ds.qrels, run)
                 macro += Counter(calc_results.aggregated)
                 for metric in calc_results.per_query:
