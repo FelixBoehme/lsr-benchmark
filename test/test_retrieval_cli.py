@@ -200,7 +200,8 @@ def test_build_retrieval_jobs_creates_deterministic_product(tmp_path):
             "kannolo": {"tag": "image/kannolo", "command": "/run-kannolo"},
         },
         tmp_path,
-        is_paired=False
+        is_paired=False,
+        approach_args=[],
     )
 
     assert [job.approach for job in jobs] == ["seismic", "kannolo"]
@@ -224,6 +225,7 @@ def test_build_retrieval_jobs_preserves_dots_in_local_embedding_name(tmp_path):
         {"seismic": {"tag": "image/seismic", "command": "/run-seismic"}},
         tmp_path / "output",
         is_paired=False,
+        approach_args=[],
     )
 
     assert len(jobs) == 1
@@ -816,6 +818,7 @@ def test_paired_local_embeddings(tmp_path):
         approach_to_execution=approach_to_exec,
         output_root=output_root,
         is_paired=is_paired,
+        approach_args=[],
     )
 
     assert len(jobs) == 2
@@ -843,6 +846,7 @@ def test_unpaired_retrieval(tmp_path):
         approach_to_execution=approach_to_exec,
         output_root=tmp_path / "output",
         is_paired=False,
+        approach_args=[],
     )
 
     assert len(jobs) == 4
@@ -852,3 +856,39 @@ def test_unpaired_retrieval(tmp_path):
     assert ("dataset_alpha", "embedding_B") in combinations
     assert ("dataset_beta", "embedding_A") in combinations
     assert ("dataset_beta", "embedding_B") in combinations
+
+
+def test_retrieval_command_forwards_approach_args(mocked_retrieval, tmp_path):
+    _, calls = mocked_retrieval
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "retrieval",
+            "--out",
+            str(tmp_path),
+            "--dataset",
+            DATASET,
+            "--embedding",
+            EMBEDDING,
+            "--approach-arg",
+            "--k 100",
+            "--approach-arg",
+            "--index-type hnsw",
+            "faiss",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        {
+            "image": "image/faiss",
+            "command": "/run-faiss --k 100 --index-type hnsw",
+            "dataset": DATASET,
+            "embedding": EMBEDDING,
+            "output_dir": (Path(tmp_path) / DATASET / EMBEDDING / "faiss_index-type_hnsw-k_100"),
+            "platform": "linux/amd64",
+            "cpus": None,
+            "memory": None,
+        }
+    ]

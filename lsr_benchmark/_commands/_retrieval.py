@@ -312,6 +312,7 @@ def build_retrieval_jobs(
     approach_to_execution: Mapping[str, Mapping[str, str]],
     output_root: Path,
     is_paired: bool,
+    approach_args: list[str]
 ):
     """Build deterministic jobs for the dataset/embedding/approach product."""
     jobs = []
@@ -335,8 +336,16 @@ def build_retrieval_jobs(
             if "quantization" in test_collection:
                 quant_suffix = f"-{test_collection['quantization']}"
 
+        arg_suffixes = []
+        for arg in approach_args:
+            arg_suffixes.append(("_".join(arg.split()) if " " in arg else arg).strip("-"))
+        approach_suffix = "_" if approach_args else ""
+        approach_suffix += "-".join(sorted(arg_suffixes))
+
+
         for approach in approaches:
             execution = approach_to_execution[approach]
+            command = " ".join([execution["command"], *approach_args])
             jobs.append(
                 RetrievalJob(
                     approach=approach,
@@ -345,12 +354,12 @@ def build_retrieval_jobs(
                     dataset_name=dataset_name,
                     embedding_name=embedding_name,
                     image=execution["tag"],
-                    command=execution["command"],
+                    command=command,
                     output_dir=(
                         output_root
                         / (dataset_name + quant_suffix)
                         / embedding_name
-                        / approach
+                        / (approach + approach_suffix)
                     ),
                 )
             )
@@ -453,6 +462,13 @@ def report_retrieval_stats(stats, print_message):
     help="The memory limit.",
 )
 @click.option("--rerun-failed", is_flag=True, help="Re-run failed executions.")
+@click.option(
+    "--approach-arg",
+    "approach_args",
+    type=str,
+    multiple=True,
+    help="Extra Arguments to add to the command executed in the container"
+)
 def retrieval(
     approaches: list[str],
     suite: Optional[str],
@@ -462,6 +478,7 @@ def retrieval(
     memory: Optional[str],
     rerun_failed: bool,
     out: str,
+    approach_args: list[str]
 ) -> int:
     all_messages = []
 
@@ -489,7 +506,7 @@ def retrieval(
         approaches, platform, embedding, print_message
     )
     jobs = build_retrieval_jobs(
-        approaches, dataset, embedding, approach_to_execution, Path(out), is_paired
+        approaches, dataset, embedding, approach_to_execution, Path(out), is_paired, approach_args
     )
     stats, failures = execute_retrieval_jobs(
         jobs, platform, cpus, memory, print_message, rerun_failed
