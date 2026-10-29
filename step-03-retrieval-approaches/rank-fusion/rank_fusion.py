@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 import gzip
+import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import click
 import yaml
 from ranx import Run, fuse
-from tirex_tracker import ExportFormat, register_metadata, tracking
+from tirex_tracker import ExportFormat, tracking
 
 RESOURCE_KEYS = (
     ("cpu", "energy used system"),
@@ -16,7 +17,7 @@ RESOURCE_KEYS = (
 )
 
 
-def write_joint_metadata(metadata: list[dict], out_path: Path) -> None:
+def write_joint_metadata(metadata: list[dict], tag: str, out_path: Path) -> None:
     if not metadata:
         return
 
@@ -24,6 +25,7 @@ def write_joint_metadata(metadata: list[dict], out_path: Path) -> None:
         "actor": metadata[0]["actor"],
         "data": metadata[0]["data"],
         "resources": {resource: {} for resource, _ in RESOURCE_KEYS},
+        "tag": tag,
     }
 
     for resource, key in RESOURCE_KEYS:
@@ -49,6 +51,31 @@ def write_joint_metadata(metadata: list[dict], out_path: Path) -> None:
         yaml.safe_dump(combined_metadata, f, sort_keys=False)
 
 
+def write_embedding_metadata(run_paths: list[Path], target_dir: Path) -> None:
+    target_dir.mkdir()
+    next_index = {"doc": 0, "query": 0}
+    for run_path in run_paths:
+        for path in sorted((run_path / ".embedding").iterdir(), key=lambda p: (len(p.name), p.name)):
+            meta_type = "doc" if path.name.endswith("doc-ir-metadata.yml") else "query"
+            shutil.copy(path, target_dir / f"d{next_index[meta_type]}-{meta_type}-ir-metadata.yml")
+            next_index[meta_type] += 1
+
+
+def warm_up_ranx(runs: list[Run], norm: str, method: str) -> None:
+    """Fuse tiny runs with the same numba types as `runs`, so ranx's numba
+    compilation happens before the measured fusion.
+
+    numba compiles one version per argument type, and ranx stores each run's
+    doc ids as fixed-length strings sized to that run's longest doc id. The
+    tiny runs therefore use doc ids of exactly that length.
+    """
+    tiny_runs = []
+    for run in runs:
+        doc_id_length = run.run._numba_type_.value_type.key_type.count
+        tiny_runs.append(Run({"q": {"a" * doc_id_length: 1.0, "b" * doc_id_length: 0.5}}))
+    fuse(runs=tiny_runs, norm=norm, method=method)
+
+
 @click.command()
 @click.argument("run-paths", type=click.Path(exists=True, resolve_path=True, path_type=Path), nargs=-1, required=True)
 @click.option(
@@ -65,36 +92,17 @@ def write_joint_metadata(metadata: list[dict], out_path: Path) -> None:
 )
 @click.option("--output", type=Path, required=True)
 def main(run_paths, norm, method, output):
-    metadata_files = ([], [])
+    metadata = ([], [])
     for run_path in run_paths:
         for i, meta_type in enumerate(["index", "retrieval"]):
             meta_path = run_path / f"{meta_type}-metadata.yml"
             if meta_path.exists():
-                metadata_files[i].append(meta_path)
-
-    metadata = ([], [])
-    test_collection = None
-    for i in range(2):
-        for metadata_path in metadata_files[i]:
-            with metadata_path.open() as f:
-                meta = yaml.safe_load(f)
-                metadata[i].append(meta)
-                meta_collection = meta["data"]["test collection"]["name"]
-                if test_collection is None:
-                    test_collection = meta_collection
-                elif test_collection != meta_collection:
-                    raise ValueError(f"Mismatching test collection names. {test_collection!r} and {meta_collection!r}")
-
+                metadata[i].append(yaml.safe_load(meta_path.read_text()))
     output.mkdir(parents=True, exist_ok=True)
-    register_metadata(
-        {
-            "actor": {"team": "reneuir-baselines"},
-            "tag": f"rank-fusion-{norm}_norm-{method}_method",
-            "data": metadata[0][0]["data"],
-        }
-    )
+    tag = f"rank-fusion-{norm}_norm-{method}_method"
 
     runs = [Run.from_file(path / "run.txt.gz") for path in run_paths]
+    warm_up_ranx(runs, norm, method)
     retrieval_metadata_path = output / "retrieval-metadata.yml"
     with tracking(
         export_file_path=retrieval_metadata_path,
@@ -110,9 +118,12 @@ def main(run_paths, norm, method, output):
         with open(run_txt, "rb") as f_in, gzip.open(output / "run.txt.gz", "wb") as f_out:
             f_out.writelines(f_in)
 
-    write_joint_metadata(metadata[0], output / "index-metadata.yml")
-    write_joint_metadata(metadata[1], retrieval_metadata_path)
-    # TODO: copy doc-ir-metadata.yml same for query
+        embedding_dir = Path(tmp) / ".embedding"
+        write_embedding_metadata(run_paths, embedding_dir)
+        shutil.copytree(embedding_dir, output / ".embedding", dirs_exist_ok=True)
+
+    write_joint_metadata(metadata[0], tag, output / "index-metadata.yml")
+    write_joint_metadata(metadata[1], tag, retrieval_metadata_path)
 
 
 if __name__ == "__main__":
